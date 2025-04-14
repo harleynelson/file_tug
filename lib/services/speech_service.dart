@@ -1,34 +1,34 @@
-// ./lib/services/speech_service.dart (Entire File - Dialogflow Integration)
+// ./lib/services/speech_service.dart (Entire File - Updated Parsing & Update Logic)
 
 import 'dart:async';
-// import 'dart:io'; // No longer needed directly here
-import 'dart:convert'; // Needed for Dialogflow response handling
 
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle; // Needed to load asset
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:dialog_flowtter/dialog_flowtter.dart';
-// command_parser_service.dart is removed
+// Updated model import
 import '../models/parsed_command.dart';
+// TODO: Import ConnectionService and ContactService when needed
 
 class SpeechService with ChangeNotifier {
   final SpeechToText _speechToText = SpeechToText();
-  DialogFlowtter? _dialogFlowtter; // Dialogflow client instance
+  DialogFlowtter? _dialogFlowtter;
+  // Inject services if needed:
+  // final ConnectionService _connectionService;
+  // final ContactService _contactService;
+  // SpeechService(this._connectionService, this._contactService);
 
-  // State Variables
   bool _isSpeechEnabled = false;
   bool _isListening = false;
   String _lastWords = "";
   String _currentError = "";
   ParsedCommand? _parsedCommand;
-
-  // State variables for final result handling from speech_to_text
   String? _finalRecognizedText;
   bool _finalResultReceived = false;
   bool _parsingAttempted = false;
-
-  // Timer and Manual Stop Control (Keep if desired)
+  bool _associationAttempted = false;
   Timer? _listenTimer;
   bool _manualStopRequested = false;
   final Duration _maxListenDuration = const Duration(seconds: 30);
@@ -40,20 +40,15 @@ class SpeechService with ChangeNotifier {
   String get lastError => _currentError;
   ParsedCommand? get parsedCommand => _parsedCommand;
 
-  // --- Initialization ---
+  // --- Initialization (mostly unchanged) ---
   Future<void> initialize() async {
     _resetState();
     try {
-      // Initialize Dialogflow first
       await _initializeDialogflow();
-
-      // Initialize SpeechToText
       _isSpeechEnabled = await _speechToText.initialize(
         onError: _statusErrorListener,
         onStatus: _statusListener,
       );
-
-      // Check if both services initialized correctly
       if (!_isSpeechEnabled) {
         _currentError = "Speech recognition not available.";
       } else if (_dialogFlowtter == null) {
@@ -70,9 +65,8 @@ class SpeechService with ChangeNotifier {
     notifyListeners();
   }
 
-  // Helper to initialize Dialogflow
   Future<void> _initializeDialogflow() async {
-    try {
+     try {
       // Ensure path matches where you placed the JSON key in assets
       final String credentialsJson = await rootBundle.loadString('assets/dialogflow_credentials.json');
       final credentials = DialogAuthCredentials.fromJson(jsonDecode(credentialsJson));
@@ -83,93 +77,80 @@ class SpeechService with ChangeNotifier {
       _dialogFlowtter = null;
     }
   }
-
-  // Helper to reset session state
   void _resetState() {
-     _lastWords = "";
+      _lastWords = "";
      _currentError = "";
      _parsedCommand = null;
      _finalRecognizedText = null;
      _finalResultReceived = false;
      _parsingAttempted = false;
+     _associationAttempted = false; // Reset association flag
      _manualStopRequested = false;
      _cancelTimer();
-     // _isListening state managed by listeners/controls
   }
-
-  // Helper to cancel the timer
   void _cancelTimer() {
-    _listenTimer?.cancel();
-    _listenTimer = null;
+      _listenTimer?.cancel();
+      _listenTimer = null;
   }
 
-  // --- Listening Control ---
+  // --- Listening Control (unchanged) ---
   void startListening() {
     if (!_isSpeechEnabled || _isListening) return;
 
-    _resetState();
-    _isListening = true; // Assume listening starts immediately for UI feedback
+    _resetState(); // Full reset before starting
+    _isListening = true;
     _manualStopRequested = false;
-    notifyListeners(); // Update UI immediately
+    notifyListeners();
 
     print("Starting speech listening (max ${_maxListenDuration.inSeconds} seconds or manual stop)...");
 
-    // Start app-level timer (optional, provides backup timeout)
     _cancelTimer();
     _listenTimer = Timer(_maxListenDuration, _onTimerExpired);
 
     _speechToText.listen(
       onResult: _onSpeechResult,
       listenFor: _maxListenDuration,
-      pauseFor: const Duration(seconds: 10), // Use a reasonable pause duration
+      pauseFor: const Duration(seconds: 10),
       localeId: "en_US",
-      listenMode: ListenMode.dictation, // Use dictation mode
+      listenMode: ListenMode.dictation,
       partialResults: true,
-      cancelOnError: false, // Handle errors via listener
+      cancelOnError: false,
     );
   }
-
-  // Called when our manual 30-second timer expires
   void _onTimerExpired() {
     print("Listen timer expired after ${_maxListenDuration.inSeconds} seconds.");
     if (_isListening) {
         print("Timer causing stop. Stopping listening.");
-        _speechToText.stop(); // Ask plugin to stop
-        // Let status listener handle state change
+        _speechToText.stop();
+        // Let status listener handle state change and parsing/association
     }
      _listenTimer = null;
   }
-
   void stopListening() {
-    if (!_isListening) {
+     if (!_isListening) {
       print("StopListening called but already not listening.");
       return;
     }
     print("StopListening called manually.");
-    _manualStopRequested = true; // Set flag
-    _cancelTimer(); // Cancel the timer
+    _manualStopRequested = true;
+    _cancelTimer();
 
-    _speechToText.stop(); // Ask plugin to stop
+    _speechToText.stop();
 
-    // --- Directly handle state change and parsing on manual stop ---
+    // --- Directly handle state change and trigger parsing/association on manual stop ---
     bool wasListening = _isListening;
     _isListening = false;
     print("--> State updated: No Longer Listening (Manual stop)");
 
     if (wasListening) {
-        _tryFinalParse(); // Trigger parse immediately
-        // No need to notify here, _tryFinalParse will notify at the end
+        _tryFinalParseAndAssociate(); // Trigger parse & association immediately
     }
-    // --------------------------------------------------------------
+    // -----------------------------------------------------------------------------------
   }
 
-  // --- SpeechToText Callbacks ---
-
-  /// Called when speech recognition result is available
+  // --- SpeechToText Callbacks (unchanged) ---
   void _onSpeechResult(SpeechRecognitionResult result) {
-    _lastWords = result.recognizedWords;
-    // Minimal logging here to avoid spamming console during active speech
-    // print("Speech Result: '$_lastWords' (Final: ${result.finalResult})");
+     _lastWords = result.recognizedWords;
 
     if (result.finalResult) {
       print("--> FinalResult flag received from STT. Storing final text: '$_lastWords'");
@@ -177,15 +158,12 @@ class SpeechService with ChangeNotifier {
       _finalResultReceived = true;
     }
 
-    // Only notify if still listening to update live words in UI
     if(_isListening) {
         notifyListeners();
     }
   }
-
-  /// Called when the STT listening status changes
   void _statusListener(String status) {
-    print('STT status changed: $status - Current _isListening state: $_isListening');
+     print('STT status changed: $status - Current _isListening state: $_isListening');
     bool wasListening = _isListening;
 
     if (status == SpeechToText.listeningStatus) {
@@ -194,57 +172,43 @@ class SpeechService with ChangeNotifier {
            _currentError = "";
            print("--> State confirmed: Now Listening");
            notifyListeners();
-        } else {
-           print("--> State already listening, STT status confirms.");
         }
     } else if (status == SpeechToText.notListeningStatus || status == SpeechToText.doneStatus) {
-        if (wasListening) {
-            bool timerExpired = _listenTimer == null && !_manualStopRequested;
-            if (timerExpired) {
-                 _isListening = false;
-                 print("--> State updated: No Longer Listening (Reason: Timer) Status: $status");
-                 _tryFinalParse(); // Parse when timer expires
-                 // No need to notify here, _tryFinalParse will notify at the end
-            } else if (_manualStopRequested) {
-                 print("--> STT Status '$status' received after manual stop. State already updated.");
-                 // Ensure state is false if somehow missed in stopListening
-                 if (_isListening) {
-                    _isListening = false;
-                    notifyListeners(); // Notify just in case state wasn't updated
-                 }
-            } else {
-                print("--> Ignoring premature STT '$status' status change, waiting for manual stop or timer.");
+        if (wasListening && !_manualStopRequested) { // Only trigger if not manually stopped
+            _isListening = false;
+            print("--> State updated: No Longer Listening (Reason: STT Status '$status')");
+            _tryFinalParseAndAssociate(); // Trigger parse & association when STT stops naturally
+        } else if (wasListening && _manualStopRequested) {
+            print("--> STT Status '$status' received after manual stop. State already updated.");
+            // Ensure state is false if somehow missed in stopListening
+            if (_isListening) {
+                _isListening = false;
+                notifyListeners();
             }
         } else {
-             print("--> STT Status '$status' received but state was already not listening.");
+             print("--> STT Status '$status' received but state was already not listening or manual stop occurred.");
         }
-    } else {
-        print("--> Unhandled STT status: $status");
     }
   }
-
-  /// Called on STT recognition errors
   void _statusErrorListener(dynamic errorNotification) {
       print('!!! STT Error Received: ${errorNotification.errorMsg} - Listening state was: $_isListening');
       _currentError = "STT Error: ${errorNotification.errorMsg}";
 
-      if (_isListening) { // Only act if we thought we were listening
-          _isListening = false; // Stop listening on error
-          _cancelTimer(); // Stop timer on error
+      if (_isListening) {
+          _isListening = false;
+          _cancelTimer();
           print("--> State updated: No Longer Listening due to STT error.");
-          _tryFinalParse(parseOnError: true); // Attempt parse on error
-          // No need to notify here, _tryFinalParse will notify at the end
+          _tryFinalParseAndAssociate(parseOnError: true); // Attempt parse/association on error
       } else {
-         print("--> STT Error received but state was already not listening.");
-         // Update UI to show the error even if not listening
-         notifyListeners();
+         notifyListeners(); // Update UI to show the error
       }
   }
 
-  // --- Dialogflow Parsing Logic ---
-  void _tryFinalParse({bool parseOnError = false}) async { // Make async
+
+  // --- Combined Parsing and Association Logic (Updated for new model fields) ---
+  void _tryFinalParseAndAssociate({bool parseOnError = false}) async {
      if (_parsingAttempted) {
-        print("--> Final parse already attempted for this session.");
+        print("--> Final parse/association already attempted for this session.");
         return;
      }
      if (_dialogFlowtter == null) {
@@ -257,176 +221,215 @@ class SpeechService with ChangeNotifier {
      }
 
      _parsingAttempted = true;
-     _manualStopRequested = false;
+     _manualStopRequested = false; // Reset flag
 
-     String? textToParse;
-     if (_finalResultReceived && _finalRecognizedText != null && _finalRecognizedText!.isNotEmpty) {
-        textToParse = _finalRecognizedText;
-     } else if (_lastWords.isNotEmpty) {
-        textToParse = _lastWords;
-     }
-
+     String? textToParse = _finalRecognizedText ?? (_lastWords.isNotEmpty ? _lastWords : null);
      if (textToParse == null || textToParse.isEmpty) {
         print("No text available to parse.");
         _parsedCommand = ParsedCommand.failure("");
+        notifyListeners(); // Notify UI about the failure
         return;
      }
 
      print("Sending to Dialogflow: '$textToParse'");
+     // Set initial state before async call
      _parsedCommand = null;
      _currentError = "";
-     notifyListeners();
+     _associationAttempted = false; // Reset for this attempt
+     notifyListeners(); // Show 'processing' or clear previous result
 
+     ParsedCommand? initialParsedResult;
      try {
-         DetectIntentResponse response = await _dialogFlowtter!.detectIntent(
-            queryInput: QueryInput(text: TextInput(text: textToParse)),
-         );
-
+         DetectIntentResponse response = await _dialogFlowtter!.detectIntent(queryInput: QueryInput(text: TextInput(text: textToParse)));
          QueryResult? queryResult = response.queryResult;
          String intentName = queryResult?.intent?.displayName ?? "unknown";
          Map<String, dynamic>? parameters = queryResult?.parameters;
+         print("Dialogflow Intent: $intentName, Parameters: ${parameters ?? 'None'}");
 
-         print("Dialogflow Intent: $intentName");
-         print("Dialogflow Parameters: ${parameters ?? 'None'}");
-
-         // !!! IMPORTANT: Ensure 'SendCommand' matches the Intent name in Dialogflow !!!
          if (intentName == 'SendCommand' && parameters != null) {
-             // --- Parameter Extraction with Multi-Contact Handling ---
-             String? file = parameters['fileName']?.toString();
-
-             String? contact;
+             // --- Extract parameters (same logic) ---
+             String? fileParam = parameters['fileName']?.toString();
+             String? contactParamValue; // Extracted contact name string
              dynamic contactParam = parameters['contactName'];
              if (contactParam is List && contactParam.isNotEmpty) {
-                 // Extract names from the list, filter nulls/empty, join with ", "
-                 contact = contactParam
-                     .map((item) {
-                         if (item is Map) {
-                             return item['name']?.toString(); // Extract name if it's a map
-                         } else if (item is String) {
-                             return item; // Handle if it's just a list of strings
-                         }
-                         return null; // Ignore other types
-                     })
-                     .where((name) => name != null && name.isNotEmpty) // Filter out nulls/empty
-                     .join(", "); // Join valid names
-             } else if (contactParam is String && contactParam.isNotEmpty) {
-                 // Handle case where it's just a single string
-                 contact = contactParam;
-             }
-             // If extraction resulted in an empty string, set contact to null
-             if (contact != null && contact.isEmpty) {
-                contact = null;
-             }
+                contactParamValue = contactParam
+                     .map((item) => (item is Map ? item['name']?.toString() : (item is String ? item : null)))
+                     .where((name) => name != null && name.isNotEmpty)
+                     .join(", ");
+              }
+             else if (contactParam is String && contactParam.isNotEmpty) { contactParamValue = contactParam; }
+             if (contactParamValue != null && contactParamValue.isEmpty) contactParamValue = null;
+             String? messageParam = parameters['messageBody']?.toString();
 
-             String? message = parameters['messageBody']?.toString();
-             // --- End Parameter Extraction ---
-
-             // Basic validation: require file OR contact for success
-             if ((file != null && file.isNotEmpty) || (contact != null && contact.isNotEmpty)) {
-                 _parsedCommand = ParsedCommand(
+             // --- Populate ParsedCommand (using original and current fields) ---
+             if ((fileParam != null && fileParam.isNotEmpty) || (contactParamValue != null && contactParamValue.isNotEmpty)) {
+                 initialParsedResult = ParsedCommand(
                      originalText: textToParse,
-                     fileName: file?.isEmpty ?? true ? null : file,
-                     contactName: contact, // Use the potentially joined contact string
-                     messageBody: message?.isEmpty ?? true ? null : message,
+                     // Populate original fields
+                     originalFileName: fileParam?.isEmpty ?? true ? null : fileParam,
+                     originalContactName: contactParamValue,
+                     originalMessageBody: messageParam?.isEmpty ?? true ? null : messageParam,
+                     // Populate current fields (initially same as original)
+                     fileName: fileParam?.isEmpty ?? true ? null : fileParam,
+                     contactName: contactParamValue,
+                     messageBody: messageParam?.isEmpty ?? true ? null : messageParam,
+                     // Set status
                      parseSuccess: true,
+                     fileStatus: (fileParam != null && fileParam.isNotEmpty) ? AssociationStatus.pending : AssociationStatus.notFound,
+                     contactStatus: (contactParamValue != null && contactParamValue.isNotEmpty) ? AssociationStatus.pending : AssociationStatus.notFound,
                  );
-                  print("Parser result (from Dialogflow): Success=true, File='${_parsedCommand?.fileName}', Contact='${_parsedCommand?.contactName}', Message='${_parsedCommand?.messageBody}'");
+                 print("Dialogflow Parse SUCCESS (Initial): File='${initialParsedResult.fileName}', Contact='${initialParsedResult.contactName}' (Status: Pending)");
              } else {
-                 print("Dialogflow parsed 'SendCommand', but missing required file/contact parameters.");
+                 print("Dialogflow Parse FAILURE: Missing required file/contact parameters.");
                  _parsedCommand = ParsedCommand.failure(textToParse);
                  _currentError = "Missing file or contact name in command.";
-             }
-         }
-         // ... (rest of the error handling as before) ...
-         else if (queryResult != null) {
-              print("Dialogflow intent '$intentName' not recognized or parameters missing.");
+              }
+         } else {
+             print("Dialogflow Parse FAILURE: Intent '$intentName' not recognized or parameters missing.");
              _parsedCommand = ParsedCommand.failure(textToParse);
              _currentError = "Command not recognized by NLU.";
-         }
-         else {
-              print("Dialogflow returned an unexpected or empty response.");
-              _parsedCommand = ParsedCommand.failure(textToParse);
-              _currentError = "NLU service returned empty response.";
-         }
-
+          }
      } catch (e, s) {
          print("!!! Error calling Dialogflow or processing response: $e");
          print("!!! StackTrace: $s");
          _currentError = "Error processing command via NLU.";
          _parsedCommand = ParsedCommand.failure(textToParse);
-     } finally {
-         notifyListeners();
-     }
+         // Don't proceed to association on Dialogflow error
+         initialParsedResult = null;
+      }
+
+     // --- Trigger Association Phase (Unchanged logic, works on initialParsedResult) ---
+     if (initialParsedResult != null) {
+        _parsedCommand = initialParsedResult; notifyListeners(); // Show initial parse
+        print("--- Starting Association Phase ---");
+        _associationAttempted = true;
+        await _performAssociation(_parsedCommand!); // Runs association logic
+        print("--- Association Phase Complete ---");
+     } else { notifyListeners(); } // Update UI if parsing failed
   }
 
-  /// Processes text input directly using Dialogflow.
-  Future<void> processTextCommand(String textToParse) async { // Keep async if needed elsewhere, but await removed below
-    // Reset parsing state for this new command
-    _parsingAttempted = false;
-    _parsedCommand = null;
-    _currentError = "";
-    // Reset STT specific fields as well for consistency
-    _lastWords = textToParse; // Store the input text here
-    _finalRecognizedText = textToParse;
-    _finalResultReceived = true; // Treat text input as final
+  /// Placeholder method to perform file and contact association (Unchanged)
+  Future<void> _performAssociation(ParsedCommand commandToUpdate) async {
+      ParsedCommand workingCommand = commandToUpdate;
+      bool changed = false;
+      // --- Associate File (Simulated logic - unchanged) ---
+      if (workingCommand.fileName != null && workingCommand.fileStatus == AssociationStatus.pending) {
+         print("Associating File: '${workingCommand.fileName}'");
+         // ** Placeholder ** - Replace with actual ConnectionService call
+         await Future.delayed(const Duration(milliseconds: 500)); // Simulate
+         final mockFilePath = "/path/to/mock/${workingCommand.fileName}.pdf";
+         workingCommand = workingCommand.copyWith(fileStatus: AssociationStatus.foundSingle, resolvedFilePath: () => mockFilePath);
+         print("File Association Result: FoundSingle -> $mockFilePath");
+         changed = true;
+      }
+      // --- Associate Contact (Simulated logic - unchanged) ---
+       if (workingCommand.contactName != null && workingCommand.contactStatus == AssociationStatus.pending) {
+           print("Associating Contact: '${workingCommand.contactName}'");
+            // ** Placeholder ** - Replace with actual ContactService/flutter_contacts call
+           await Future.delayed(const Duration(milliseconds: 600)); // Simulate
+           workingCommand = workingCommand.copyWith(contactStatus: AssociationStatus.foundMultiple, resolvedContactId: () => null);
+           print("Contact Association Result: FoundMultiple");
+           changed = true;
+       }
+      // --- Update State ---
+      if (changed) { _parsedCommand = workingCommand; notifyListeners(); }
+      else { print("No association changes detected."); }
+  }
 
+  /// Processes text input directly (Unchanged)
+  Future<void> processTextCommand(String textToParse) async {
+    _parsingAttempted = false; _associationAttempted = false; _parsedCommand = null;
+    _currentError = ""; _lastWords = textToParse; _finalRecognizedText = textToParse; _finalResultReceived = true;
     print("Processing text command: '$textToParse'");
-
-    // Call the existing parsing logic, but DON'T await it here.
-    // It will run asynchronously and notify listeners when done.
-    _tryFinalParse(); // REMOVED await
-
-    // No need to notify here, _tryFinalParse handles it.
+    _tryFinalParseAndAssociate(); // Run the full logic
   }
 
 
-  // --- Update Methods for Parsed Command (No Change Needed) ---
-  // These allow the UI (HomeScreen) to update the parsed results if the user edits them.
-  void updateParsedFileName(String newFileName) {
+  // --- Update Methods for Parsed Command (Updated to modify only CURRENT fields) ---
+
+  /// Called when user manually selects a file using the file picker.
+  void userSelectedFile(String filePath, String? displayedFileName) {
       if (_parsedCommand == null) return;
-    _parsedCommand = ParsedCommand(
-      originalText: _parsedCommand!.originalText,
-      fileName: newFileName,
-      contactName: _parsedCommand!.contactName,
-      messageBody: _parsedCommand!.messageBody,
-      parseSuccess: _parsedCommand!.parseSuccess, // Keep success status
-    );
-    print("SpeechService: Updated file name to '$newFileName'");
-    notifyListeners();
-   }
-  void updateParsedContactName(String newContactName) {
-      if (_parsedCommand == null) return;
-    _parsedCommand = ParsedCommand(
-      originalText: _parsedCommand!.originalText,
-      fileName: _parsedCommand!.fileName,
-      contactName: newContactName,
-      messageBody: _parsedCommand!.messageBody,
-      parseSuccess: _parsedCommand!.parseSuccess,
-    );
-     print("SpeechService: Updated contact name to '$newContactName'");
-    notifyListeners();
+      print("SpeechService: User selected file '$filePath'. Updating CURRENT fileName.");
+      _parsedCommand = _parsedCommand!.copyWith(
+          // ** Only update the current fileName **
+          fileName: displayedFileName != null ? () => displayedFileName : _parsedCommand!.fileName.asValueGetter,
+          // Update status and resolved path
+          fileStatus: AssociationStatus.userSelected,
+          resolvedFilePath: () => filePath,
+          // Ensure parseSuccess is true if we now have a required field
+          parseSuccess: (_parsedCommand!.contactName != null || (displayedFileName != null && displayedFileName.isNotEmpty)) || _parsedCommand!.parseSuccess,
+      );
+      notifyListeners();
   }
-  void updateParsedMessageBody(String newMessageBody) {
+
+  /// Called when user manually selects a contact.
+  void userSelectedContact(String contactId, String displayedContactName) {
       if (_parsedCommand == null) return;
-    _parsedCommand = ParsedCommand(
-      originalText: _parsedCommand!.originalText,
-      fileName: _parsedCommand!.fileName,
-      contactName: _parsedCommand!.contactName,
-      messageBody: newMessageBody,
-      parseSuccess: _parsedCommand!.parseSuccess,
-    );
-     print("SpeechService: Updated message body to '$newMessageBody'");
-    notifyListeners();
+      print("SpeechService: User selected contact '$displayedContactName'. Updating CURRENT contactName.");
+       _parsedCommand = _parsedCommand!.copyWith(
+          // ** Only update the current contactName **
+          contactName: () => displayedContactName,
+          // Update status and resolved ID
+          contactStatus: AssociationStatus.userSelected,
+          resolvedContactId: () => contactId,
+           // Ensure parseSuccess is true
+          parseSuccess: (_parsedCommand!.fileName != null || displayedContactName.isNotEmpty) || _parsedCommand!.parseSuccess,
+      );
+      notifyListeners();
   }
-  void setParseSuccess(bool success) {
-       if (_parsedCommand == null) return;
-     _parsedCommand = ParsedCommand(
-      originalText: _parsedCommand!.originalText,
-      fileName: _parsedCommand!.fileName,
-      contactName: _parsedCommand!.contactName,
-      messageBody: _parsedCommand!.messageBody,
-      parseSuccess: success,
-    );
+
+  /// Called when user edits the message body via the UI.
+  void userEditedMessageBody(String newMessageBody) {
+      if (_parsedCommand == null) return;
+       print("SpeechService: User edited message body. Updating CURRENT messageBody.");
+      _parsedCommand = _parsedCommand!.copyWith(
+        // ** Only update the current messageBody **
+        messageBody: () => newMessageBody.isEmpty ? null : newMessageBody,
+        // Ensure parseSuccess is true
+        parseSuccess: (_parsedCommand!.fileName != null || _parsedCommand!.contactName != null) || _parsedCommand!.parseSuccess,
+      );
+      notifyListeners();
+  }
+
+  // --- Methods below handle editing the NAME itself (might need re-association) ---
+
+  /// Called if user *edits the file name text* directly (less common)
+  void userEditedFileName(String newFileName) {
+      if (_parsedCommand == null) return;
+      print("SpeechService: User edited file NAME to '$newFileName'. Resetting association.");
+      _parsedCommand = _parsedCommand!.copyWith(
+        // Update current name
+        fileName: () => newFileName.isEmpty ? null : newFileName,
+        // Reset status and resolved path - needs re-association
+        fileStatus: AssociationStatus.pending,
+        resolvedFilePath: () => null,
+        // Keep originalFileName as is
+      );
+      // TODO: Trigger re-association for the file (e.g., call _performAssociation again)
+      notifyListeners();
+  }
+
+   /// Called if user *edits the contact name text* directly (less common)
+   void userEditedContactName(String newContactName) {
+      if (_parsedCommand == null) return;
+       print("SpeechService: User edited contact NAME to '$newContactName'. Resetting association.");
+      _parsedCommand = _parsedCommand!.copyWith(
+        // Update current name
+        contactName: () => newContactName.isEmpty ? null : newContactName,
+        // Reset status and resolved ID - needs re-association
+        contactStatus: AssociationStatus.pending,
+        resolvedContactId: () => null,
+         // Keep originalContactName as is
+      );
+      // TODO: Trigger re-association for the contact
+      notifyListeners();
+  }
+
+   // setParseSuccess might be less needed now, but kept for flexibility
+   void setParseSuccess(bool success) {
+      if (_parsedCommand == null) return;
+     _parsedCommand = _parsedCommand!.copyWith(parseSuccess: success);
      print("SpeechService: Updated parse success to '$success'");
     notifyListeners();
    }

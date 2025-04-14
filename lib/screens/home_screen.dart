@@ -1,4 +1,4 @@
-// ./lib/screens/home_screen.dart (Entire File - Updated with Text Input)
+// ./lib/screens/home_screen.dart (Entire File - Updated Text Construction)
 
 import 'dart:async';
 import 'package:flutter/gestures.dart';
@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/speech_service.dart';
 import '../services/connection_service.dart';
+// Import model for AssociationStatus and ParsedCommand structure
 import '../models/parsed_command.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path/path.dart' as p;
@@ -16,19 +17,14 @@ enum EntityType { file, contact, message, none }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-
 class _HomeScreenState extends State<HomeScreen> {
-
   EntityType _selectedEntityType = EntityType.none;
-  // Controller for message editing dialog
   final TextEditingController _messageEditController = TextEditingController();
-  // Controller for the new text command input field
-  final TextEditingController _textCommandController = TextEditingController(); // ** NEW **
+  final TextEditingController _textCommandController = TextEditingController();
   String? _selectedTestPhrase;
 
   @override
@@ -36,443 +32,443 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     Provider.of<SpeechService>(context, listen: false).initialize();
     _requestContactsPermission();
-    // Optional: Initialize dropdown selection if desired
-    // _selectedTestPhrase = testCommandPhrases.first;
   }
 
   @override
   void dispose() {
     _messageEditController.dispose();
-    _textCommandController.dispose(); // ** NEW: Dispose new controller **
+    _textCommandController.dispose();
     super.dispose();
   }
 
-  // --- Permission Request (No change) ---
   Future<void> _requestContactsPermission() async {
-     // ... (existing code) ...
-     if (await FlutterContacts.requestPermission(readonly: true)) {
+      if (await FlutterContacts.requestPermission(readonly: true)) {
         print("Contacts permission granted.");
-     } else {
+      } else {
         print("Contacts permission denied.");
-     }
+      }
   }
 
-  // --- Edit Action Handlers (No change) ---
-  Future<void> _editFileName(BuildContext context) async {
-     // ... (existing code) ...
-     final connectionService = Provider.of<ConnectionService>(context, listen: false);
+  // --- Edit Action Handlers (Unchanged - they call correct Service methods now) ---
+  Future<void> _handleFileAction(BuildContext context) async {
      final speechService = Provider.of<SpeechService>(context, listen: false);
-     await connectionService.pickLocalFiles(allowMultiple: false);
-     if (connectionService.lastPickedFilePath != null) {
-        String newFileName = p.basename(connectionService.lastPickedFilePath!);
-        speechService.updateParsedFileName(newFileName);
-        if(speechService.parsedCommand?.parseSuccess == false) {
-            speechService.setParseSuccess(true);
-        }
-     }
-     setState(() { _selectedEntityType = EntityType.none; });
-  }
+    final connectionService = Provider.of<ConnectionService>(context, listen: false);
+    final currentStatus = speechService.parsedCommand?.fileStatus;
 
-  Future<void> _editContactName(BuildContext context) async {
-    // ... (existing code) ...
-    final speechService = Provider.of<SpeechService>(context, listen: false);
-    Contact? contact;
-     if (!await FlutterContacts.requestPermission(readonly: true)) {
-         if(context.mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                 content: Text('Contact permission is needed to select a recipient.')
-             ));
-         }
-         setState(() { _selectedEntityType = EntityType.none; });
-         return;
-     }
+    print("Handling file action. Current status: $currentStatus");
+
+    // TODO: Implement logic for AssociationStatus.foundMultiple (e.g., show dialog)
+    // if (currentStatus == AssociationStatus.foundMultiple) { ... }
+
+    // For pending, notFound, or other states, trigger the file picker
     try {
-       contact = await FlutterContacts.openExternalPick();
-       if (contact != null) {
-         speechService.updateParsedContactName(contact.displayName);
-         if(speechService.parsedCommand?.parseSuccess == false) {
-            speechService.setParseSuccess(true);
-         }
-       } else {
-         print("Contact selection cancelled or failed.");
-       }
-    } catch (e) {
-       print("Error picking contact: $e");
-        if(context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Error selecting contact: $e')
-            ));
+        await connectionService.pickLocalFiles(allowMultiple: false);
+        if (connectionService.lastPickedFilePath != null) {
+          String filePath = connectionService.lastPickedFilePath!;
+          String displayFileName = p.basename(filePath);
+          // Use the new method in SpeechService
+          speechService.userSelectedFile(filePath, displayFileName);
+        } else {
+           print("File picking cancelled.");
+        }
+    } catch(e) {
+       print("Error picking file: $e");
+        if (context.mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error picking file: $e')),
+            );
         }
     } finally {
-        setState(() { _selectedEntityType = EntityType.none; });
-    }
-  }
-
-  Future<void> _editMessageBody(BuildContext context) async {
-    // ... (existing code) ...
-     final speechService = Provider.of<SpeechService>(context, listen: false);
-    final currentMessage = speechService.parsedCommand?.messageBody ?? "";
-    _messageEditController.text = currentMessage;
-    final newMessage = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog( /* ... dialog definition ... */ ),
-    );
-    if (newMessage != null && newMessage != currentMessage) {
-      speechService.updateParsedMessageBody(newMessage);
-       if(speechService.parsedCommand?.parseSuccess == false) {
-            speechService.setParseSuccess(true);
+        // Deselect after action complete or cancelled
+        if(mounted) {
+           setState(() { _selectedEntityType = EntityType.none; });
         }
     }
-    setState(() { _selectedEntityType = EntityType.none; });
-  }
+   }
+  Future<void> _handleContactAction(BuildContext context) async {
+    final speechService = Provider.of<SpeechService>(context, listen: false);
+    final currentStatus = speechService.parsedCommand?.contactStatus;
 
+    print("Handling contact action. Current status: $currentStatus");
 
-  // --- Build Highlighted Text with Interaction (No change needed in logic) ---
-  InlineSpan _buildHighlightedText(ParsedCommand? command, String originalText, BuildContext context) {
-    // Styles
-    final defaultStyle = TextStyle(fontSize: 18.0, fontWeight: FontWeight.w500, color: Colors.black87);
-    final highlightStyle = defaultStyle.copyWith(fontWeight: FontWeight.bold);
-    final annotationStyle = TextStyle(fontSize: 12.0, color: Colors.black54, fontStyle: FontStyle.italic);
-
-    // Base cases
-     if (command == null || (!command.parseSuccess && _selectedEntityType == EntityType.none)) {
-        return TextSpan(
-            text: originalText.isEmpty ? 'Awaiting command...' : (command?.originalText ?? originalText),
-            style: defaultStyle);
-     }
-     if (command != null && !command.parseSuccess) {
-        return TextSpan(text: command.originalText, style: defaultStyle);
-     }
-
-    // *** CORRECTED Helper to create tappable span ***
-    // Ensure parameter names match usage below and types are correct
-    InlineSpan createHighlightSpan(
-        String? entityText, // Use entityText consistently
-        String annotation,  // Parameter for annotation text
-        Color bgColor,       // Parameter for background color
-        EntityType entityType, // Parameter for entity type enum
-        ) {
-      // Check if the text to highlight is valid
-      if (entityText == null || entityText.isEmpty) return const TextSpan();
-
-      // Build the tappable span with background, underline (if selected), and annotation
-      return TextSpan(
-        children: [
-          TextSpan(
-            text: entityText, // Use the entityText parameter
-            style: highlightStyle.copyWith(
-              backgroundColor: bgColor, // Use bgColor parameter
-              decoration: _selectedEntityType == entityType // Use entityType parameter
-                  ? TextDecoration.underline
-                  : TextDecoration.none,
-               decorationColor: Colors.red,
-               decorationThickness: 2,
-            ),
-             recognizer: TapGestureRecognizer()
-                ..onTap = () {
-                  print("Tapped on $entityType"); // Use entityType parameter
-                  // Update state when tapped
-                  setState(() {
-                     _selectedEntityType = (_selectedEntityType == entityType) ? EntityType.none : entityType; // Use entityType parameter
-                  });
-                },
-          ),
-          const TextSpan(text: ' '), // Spacer
-          // Display the annotation text using the annotation parameter
-          TextSpan(text: '[$annotation]', style: annotationStyle),
-        ],
-      );
-    } // *** End CORRECTED Helper ***
-
-    // --- Refined Index Finding (from previous step, likely okay) ---
-    String lowerOriginalText = command.originalText.toLowerCase();
-    int fileIndex = -1;
-    int contactIndex = -1;
-    int messageIndex = -1;
-    int searchStartIndex = 0;
-
-    if (command.fileName != null && command.fileName!.isNotEmpty) {
-      fileIndex = lowerOriginalText.indexOf(command.fileName!.toLowerCase(), searchStartIndex);
-      if (fileIndex != -1) {
-        searchStartIndex = fileIndex + command.fileName!.length;
+    // Check for permission first
+    if (!await FlutterContacts.requestPermission(readonly: true)) {
+      if(context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Contact permission is needed to select a recipient.')
+        ));
       }
+      setState(() { _selectedEntityType = EntityType.none; });
+      return;
     }
-    if (command.contactName != null && command.contactName!.isNotEmpty) {
-      contactIndex = lowerOriginalText.indexOf(command.contactName!.toLowerCase(), searchStartIndex);
-       if (contactIndex == -1 && fileIndex != -1) {
-          contactIndex = lowerOriginalText.indexOf(command.contactName!.toLowerCase(), 0);
-       }
-       if (contactIndex != -1) {
-           searchStartIndex = (fileIndex != -1 && fileIndex > contactIndex)
-                             ? fileIndex + command.fileName!.length
-                             : contactIndex + command.contactName!.length;
-       }
-    }
-    if (command.messageBody != null && command.messageBody!.isNotEmpty) {
-        messageIndex = lowerOriginalText.indexOf(command.messageBody!.toLowerCase(), searchStartIndex);
-         if (messageIndex == -1) {
-            messageIndex = lowerOriginalText.indexOf(command.messageBody!.toLowerCase(), 0);
+
+    // TODO: Implement logic for AssociationStatus.foundMultiple (e.g., show dialog)
+    // if (currentStatus == AssociationStatus.foundMultiple) { ... }
+
+    // For pending, notFound, or other states, trigger the contact picker
+    Contact? contact;
+    try {
+      contact = await FlutterContacts.openExternalPick();
+      if (contact != null) {
+        // Use the new method in SpeechService
+        speechService.userSelectedContact(contact.id, contact.displayName);
+      } else {
+        print("Contact selection cancelled or failed.");
+      }
+    } catch (e) {
+      print("Error picking contact: $e");
+      if(context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error selecting contact: $e')
+        ));
+      }
+    } finally {
+        // Deselect after action complete or cancelled
+         if(mounted) {
+           setState(() { _selectedEntityType = EntityType.none; });
          }
     }
-    // --- End Refined Index Finding ---
+   }
+  Future<void> _handleMessageAction(BuildContext context) async {
+    final speechService = Provider.of<SpeechService>(context, listen: false);
+    final currentMessage = speechService.parsedCommand?.messageBody ?? "";
+    _messageEditController.text = currentMessage;
 
-    // Build entities map (references keys 'text', 'annotation', 'color', 'type')
-    List<Map<String, dynamic>> entities = [];
-     if(fileIndex != -1 && command.fileName != null) entities.add({'index': fileIndex, 'type': EntityType.file, 'text': command.fileName, 'annotation': 'File', 'color': Colors.yellow.shade200, 'length': command.fileName!.length});
-     if(contactIndex != -1 && command.contactName != null) entities.add({'index': contactIndex, 'type': EntityType.contact, 'text': command.contactName, 'annotation': 'Contact', 'color': Colors.lightBlue.shade100, 'length': command.contactName!.length});
-     if(messageIndex != -1 && command.messageBody != null) entities.add({'index': messageIndex, 'type': EntityType.message, 'text': command.messageBody, 'annotation': 'Message', 'color': Colors.lightGreen.shade100, 'length': command.messageBody!.length});
-
-    // --- Span building logic (Uses the helper function correctly) ---
-    entities.sort((a, b) => a['index'].compareTo(b['index']));
-    List<InlineSpan> spans = [];
-    int currentIndex = 0;
-
-    void addPrecedingText(int entityIndex) {
-      if (entityIndex > currentIndex) {
-        spans.add(TextSpan(text: command!.originalText.substring(currentIndex, entityIndex)));
-      }
-    }
-
-    for (var entity in entities) {
-      if (entity['index'] >= 0) {
-         addPrecedingText(entity['index']);
-         // Call helper using the map keys, matching the corrected helper parameters
-         spans.add(createHighlightSpan(
-            entity['text'],       // Corresponds to entityText parameter
-            entity['annotation'], // Corresponds to annotation parameter
-            entity['color'],      // Corresponds to bgColor parameter
-            entity['type'],       // Corresponds to entityType parameter
-         ));
-         currentIndex = entity['index'] + entity['length'];
-      }
-    }
-
-    if (currentIndex < command.originalText.length) {
-      spans.add(TextSpan(text: command.originalText.substring(currentIndex)));
-    }
-
-    // Fallback
-    if (spans.isEmpty && command.originalText.isNotEmpty) {
-       print("Warning: Could not reliably find indices for highlighting. Falling back.");
-       return TextSpan(
-         text: "File: ${command.fileName ?? 'N/A'}\n"
-               "Contact: ${command.contactName ?? 'N/A'}\n"
-               "Message: ${command.messageBody ?? 'N/A'}",
-         style: defaultStyle.copyWith(color: Colors.orange[800])
-       );
-    }
-
-    return TextSpan(style: defaultStyle, children: spans);
-  }
-
-  void _sendTextCommand() {
-    final text = _textCommandController.text.trim();
-    if (text.isNotEmpty) {
-      print("Sending text command: $text");
-      Provider.of<SpeechService>(context, listen: false).processTextCommand(text);
-      _textCommandController.clear();
-      FocusScope.of(context).unfocus();
-       setState(() {
-          _selectedEntityType = EntityType.none;
-          // ** NEW: Reset dropdown after sending **
-          _selectedTestPhrase = null;
-       });
-    }
-  }
-
-
-  // --- Main Build Method ---
-  @override
-  Widget build(BuildContext context) {
-    final speechService = Provider.of<SpeechService>(context);
-
-    InlineSpan textSpanToShow = const TextSpan(text: '');
-    String statusText = "";
-
-    // Determine what to show in the display area (based on voice state mostly)
-    if (speechService.isListening) {
-       textSpanToShow = _buildHighlightedText(
-           speechService.parsedCommand, speechService.recognizedWords, context);
-       if (speechService.recognizedWords.isEmpty) {
-          textSpanToShow = const TextSpan(
-             text: 'Listening...',
-             style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.w500, color: Colors.black54)
-           );
-       }
-    } else if (speechService.lastError.isNotEmpty) {
-       // If there's an error, display it prominently
-       statusText = 'Error: ${speechService.lastError}';
-    } else if (speechService.parsedCommand != null) {
-       // If not listening and no error, show the parsed command (or fallback highlighting)
-       // Use parsedCommand.originalText which is set by both voice and text input paths
-       textSpanToShow = _buildHighlightedText(
-           speechService.parsedCommand, speechService.parsedCommand!.originalText, context);
-    }
-    // Fallback if not listening, no error, no command yet
-    else if (speechService.recognizedWords.isEmpty) {
-         statusText = 'Awaiting command...';
-    }
-    // If statusText is set, use a simple TextSpan
-     if (statusText.isNotEmpty) {
-       textSpanToShow = TextSpan(
-         text: statusText,
-         style: TextStyle(
-           fontSize: 18.0,
-           fontWeight: FontWeight.w500,
-           color: speechService.lastError.isNotEmpty ? Colors.red : Colors.black54,
-         ),
-       );
-     }
-
-    // Build Edit Action Buttons
-    Widget? editActions;
-    switch (_selectedEntityType) {
-       case EntityType.file:
-         editActions = ElevatedButton.icon(
-             // Fill in details for File button
-             icon: const Icon(Icons.file_open_outlined, size: 16),
-             label: const Text("Change File"),
-             onPressed: () => _editFileName(context),
-             style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact) // Style for compactness
-             );
-         break;
-       case EntityType.contact:
-         editActions = ElevatedButton.icon(
-             // Fill in details for Contact button
-             icon: const Icon(Icons.contact_page_outlined, size: 16),
-             label: const Text("Change Contact"),
-             onPressed: () => _editContactName(context),
-             style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact) // Style for compactness
-             );
-         break;
-       case EntityType.message:
-         editActions = ElevatedButton.icon(
-            // Fill in details for Message button
-             icon: const Icon(Icons.edit_outlined, size: 16),
-             label: const Text("Edit Message"),
-             onPressed: () => _editMessageBody(context),
-             style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact) // Style for compactness
-             );
-         break;
-       case EntityType.none:
-         editActions = null; // No button when nothing is selected
-         break;
-    }
-
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Realtor Assistant'),
+    final newMessage = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: _messageEditController,
+          autofocus: true,
+          maxLines: null, // Allow multi-line input
+          keyboardType: TextInputType.multiline,
+          decoration: const InputDecoration(hintText: 'Enter message content'),
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Manage Connections',
-            onPressed: () { /* ... navigation ... */ },
+          TextButton(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: const Text('Save'),
+            onPressed: () => Navigator.of(context).pop(_messageEditController.text),
           ),
         ],
       ),
-      body: SingleChildScrollView( // ** NEW: Added SingleChildScrollView **
+    );
+
+    // Only update if the message actually changed
+    if (newMessage != null && newMessage != currentMessage) {
+       // Use the new method in SpeechService
+       speechService.userEditedMessageBody(newMessage);
+    }
+     // Deselect after action complete or cancelled
+    if(mounted) {
+      setState(() { _selectedEntityType = EntityType.none; });
+    }
+  }
+
+
+  // --- Build Highlighted Text - *** REFACTORED *** ---
+  InlineSpan _buildHighlightedText(ParsedCommand? command, BuildContext context) {
+    // Default styles
+    final defaultStyle = TextStyle(fontSize: 18.0, fontWeight: FontWeight.w500, color: Colors.black87);
+    final highlightStyleBase = defaultStyle.copyWith(fontWeight: FontWeight.bold);
+    final annotationStyle = TextStyle(fontSize: 12.0, color: Colors.black54, fontStyle: FontStyle.italic);
+    final resolvedStyle = annotationStyle.copyWith(color: Colors.green.shade800, fontWeight: FontWeight.bold);
+    final errorStyle = annotationStyle.copyWith(color: Colors.red.shade800, fontWeight: FontWeight.bold);
+
+    // Handle null command case
+    if (command == null) {
+      return TextSpan(text: 'Awaiting command...', style: defaultStyle.copyWith(color: Colors.black54));
+    }
+    // Handle initial parse failure (show original text simply)
+    if (!command.parseSuccess && _selectedEntityType == EntityType.none) {
+        // Try showing original text if available, otherwise fallback
+        return TextSpan(text: command.originalText.isNotEmpty ? command.originalText : 'Command processing failed.', style: defaultStyle.copyWith(color: Colors.black54));
+    }
+    // If parse failed but user selected something, show original (allows clicking to edit)
+    if (!command.parseSuccess && _selectedEntityType != EntityType.none) {
+        return TextSpan(text: command.originalText, style: defaultStyle);
+    }
+
+
+    // Helper to determine background color and annotation based on status
+    // (Same helper function as before)
+    Map<String, dynamic> getEntityStyle(EntityType type, AssociationStatus status, String? resolvedValue) {
+       String annotationText; Color bgColor; InlineSpan? statusIndicator;
+       switch (status) {
+         case AssociationStatus.pending:
+           bgColor = Colors.orange.shade100; annotationText = type == EntityType.file ? 'File' : 'Contact';
+           statusIndicator = TextSpan(text: ' [Searching...]', style: annotationStyle.copyWith(color: Colors.orange.shade900)); break;
+         case AssociationStatus.notFound: case AssociationStatus.lookupFailed:
+           bgColor = Colors.red.shade100; annotationText = type == EntityType.file ? 'File' : 'Contact';
+           statusIndicator = TextSpan(text: ' [Not Found]', style: errorStyle); break;
+         case AssociationStatus.foundSingle: case AssociationStatus.userSelected:
+           bgColor = Colors.green.shade100; annotationText = type == EntityType.file ? 'File' : 'Contact';
+           String displayValue = resolvedValue ?? 'Selected';
+           if (type == EntityType.file && resolvedValue != null) displayValue = p.basename(resolvedValue);
+           // For contacts, maybe fetch display name using ID if needed later
+           statusIndicator = TextSpan(text: ' [$displayValue]', style: resolvedStyle); break;
+         case AssociationStatus.foundMultiple:
+           bgColor = Colors.yellow.shade300; annotationText = type == EntityType.file ? 'File' : 'Contact';
+           statusIndicator = TextSpan(text: ' [Multiple Found]', style: annotationStyle.copyWith(color: Colors.deepOrange.shade800, fontWeight: FontWeight.bold)); break;
+       }
+       // Add special case for message type which doesn't use association
+       if (type == EntityType.message) {
+          bgColor = Colors.lightGreen.shade100;
+          annotationText = 'Message';
+          statusIndicator = null; // No status indicator for messages
+       }
+       return {'annotation': annotationText, 'color': bgColor, 'statusIndicator': statusIndicator};
+    }
+
+    // Helper to create the actual tappable InlineSpan
+    // (Updated slightly to handle message type styling)
+    InlineSpan createHighlightSpan({ required String? entityText, required EntityType entityType, required AssociationStatus status, required String? resolvedValue, required Function() onTapAction, }) {
+      if (entityText == null || entityText.isEmpty) return const TextSpan(); // Return empty span if no text
+
+      final styleInfo = getEntityStyle(entityType, status, resolvedValue);
+      final String annotation = styleInfo['annotation']; final Color bgColor = styleInfo['color']; final InlineSpan? statusIndicator = styleInfo['statusIndicator'];
+      bool showErrorIndicator = status == AssociationStatus.notFound || status == AssociationStatus.lookupFailed || status == AssociationStatus.foundMultiple;
+      TextDecoration? decoration; Color? decorationColor; double? decorationThickness;
+
+      // Apply selection highlight or error highlight
+      if (_selectedEntityType == entityType) { decoration = TextDecoration.underline; decorationColor = Colors.blue.shade700; decorationThickness = 2; }
+      else if (showErrorIndicator && entityType != EntityType.message) { decoration = TextDecoration.underline; decorationColor = Colors.red.shade700; decorationThickness = 1.5; }
+
+      // Build the span
+      return TextSpan( children: [
+          TextSpan( text: entityText, style: highlightStyleBase.copyWith( backgroundColor: bgColor, decoration: decoration, decorationColor: decorationColor, decorationThickness: decorationThickness, ),
+            recognizer: TapGestureRecognizer()..onTap = () { print("Tapped on $entityType (Status: $status)"); setState(() { _selectedEntityType = (_selectedEntityType == entityType) ? EntityType.none : entityType; }); }, ),
+          const TextSpan(text: ' '), TextSpan(text: '[$annotation]', style: annotationStyle), if (statusIndicator != null) statusIndicator, ], );
+    } // End createHighlightSpan
+
+
+    // --- *** Text Reconstruction Logic *** ---
+    List<InlineSpan> spans = [];
+
+    // Determine the verb/action phrase (could be more dynamic later)
+    spans.add(const TextSpan(text: "Send "));
+
+    // Add File Span (using current command.fileName)
+    spans.add(createHighlightSpan(
+        entityText: command.fileName ?? command.originalFileName ?? "[File]", // Show current, fallback to original, then placeholder
+        entityType: EntityType.file,
+        status: command.fileStatus,
+        resolvedValue: command.resolvedFilePath,
+        onTapAction: () => _handleFileAction(context),
+    ));
+
+    // Add intermediate text (" to ")
+    spans.add(const TextSpan(text: " to "));
+
+    // Add Contact Span (using current command.contactName)
+    spans.add(createHighlightSpan(
+        entityText: command.contactName ?? command.originalContactName ?? "[Contact]", // Show current, fallback to original, then placeholder
+        entityType: EntityType.contact,
+        status: command.contactStatus,
+        resolvedValue: command.resolvedContactId, // Pass ID for potential display logic
+        onTapAction: () => _handleContactAction(context),
+    ));
+
+    // Add Message Span (if message exists, using current command.messageBody)
+    final currentMessage = command.messageBody; // Use current message
+    if (currentMessage != null && currentMessage.isNotEmpty) {
+        spans.add(const TextSpan(text: " with message "));
+        // Message doesn't have association status, treat as found/userSelected
+        spans.add(createHighlightSpan(
+           entityText: currentMessage,
+           entityType: EntityType.message,
+           // Pass a status that gives the desired message styling (e.g., userSelected gives green)
+           status: AssociationStatus.userSelected,
+           resolvedValue: null,
+           onTapAction: () => _handleMessageAction(context),
+        ));
+    }
+
+    // Add a period at the end?
+    spans.add(const TextSpan(text: "."));
+
+    // --- *** End Text Reconstruction Logic *** ---
+
+
+    // Fallback if spans are empty (shouldn't happen with reconstruction)
+    if (spans.isEmpty) {
+       print("Warning: Text reconstruction resulted in empty spans.");
+       return TextSpan(text: command.originalText, style: defaultStyle.copyWith(color: Colors.orange[800]));
+    }
+
+    return TextSpan(style: defaultStyle, children: spans);
+  } // End _buildHighlightedText
+
+
+  // --- Text Command Input Handling (No change) ---
+  void _sendTextCommand() {
+     final text = _textCommandController.text.trim();
+    if (text.isNotEmpty) {
+      print("Sending text command: $text");
+      // Use the service method that handles parsing AND association
+      Provider.of<SpeechService>(context, listen: false).processTextCommand(text);
+      _textCommandController.clear();
+      FocusScope.of(context).unfocus();
+      setState(() {
+        _selectedEntityType = EntityType.none; // Reset selection
+        _selectedTestPhrase = null; // Reset dropdown
+      });
+    }
+  }
+
+  // --- Main Build Method (Updated to call new _buildHighlightedText signature) ---
+  @override
+  Widget build(BuildContext context) {
+    final speechService = Provider.of<SpeechService>(context);
+    final command = speechService.parsedCommand;
+
+    InlineSpan textSpanToShow = const TextSpan(); // Initialize
+    String statusText = "";
+
+    if (speechService.isListening) { statusText = speechService.recognizedWords.isEmpty ? 'Listening...' : speechService.recognizedWords; }
+    else if (speechService.lastError.isNotEmpty) { statusText = 'Error: ${speechService.lastError}'; }
+    else if (command != null) {
+      // *** Call the refactored build method (only needs command and context) ***
+      textSpanToShow = _buildHighlightedText(command, context);
+    }
+    else { statusText = 'Awaiting command...'; }
+
+    if (statusText.isNotEmpty) {
+      textSpanToShow = TextSpan(
+        text: statusText,
+        style: TextStyle(
+          fontSize: 18.0,
+          fontWeight: FontWeight.w500,
+          // Style differently based on content (error vs status)
+          color: speechService.lastError.isNotEmpty ? Colors.red.shade700 : Colors.black54,
+        ),
+      );
+    }
+    // else: textSpanToShow holds the reconstructed highlighted text
+
+    // Build Edit Action Buttons (Unchanged logic)
+    Widget? editActions;
+     if (_selectedEntityType != EntityType.none) {
+         Function()? buttonAction; String buttonLabel = "Edit"; IconData buttonIcon = Icons.edit;
+         switch(_selectedEntityType) {
+             case EntityType.file: buttonAction = () => _handleFileAction(context); buttonLabel = "Change File"; buttonIcon = Icons.file_open_outlined; break;
+             case EntityType.contact: buttonAction = () => _handleContactAction(context); buttonLabel = "Change Contact"; buttonIcon = Icons.contact_page_outlined; break;
+             case EntityType.message: buttonAction = () => _handleMessageAction(context); buttonLabel = "Edit Message"; buttonIcon = Icons.edit_note_outlined; break;
+             case EntityType.none: buttonAction = null; break;
+         }
+         if (buttonAction != null) {
+             editActions = ElevatedButton.icon(
+                icon: Icon(buttonIcon, size: 16),
+                label: Text(buttonLabel),
+                onPressed: buttonAction,
+                style: ElevatedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                )
+            );
+         }
+     }
+
+
+    // --- Scaffold and rest of UI (Unchanged structure) ---
+    return Scaffold(
+      appBar: AppBar(
+          title: const Text('Realtor Assistant'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Manage Connections',
+              onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ConnectionsScreen()));
+              },
+            ),
+          ],
+        ),
+      body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              // Display Area (RichText) - No change in logic
+              // Display Area (RichText)
               Container(
-                 width: double.infinity,
-                 padding: const EdgeInsets.all(12.0),
-                 decoration: BoxDecoration(
-                   color: Colors.grey[200],
-                   borderRadius: BorderRadius.circular(8.0),
-                   border: _selectedEntityType != EntityType.none
-                      ? Border.all(color: Colors.red, width: 1.5)
-                      : null,
-                 ),
-                 constraints: const BoxConstraints(minHeight: 100.0),
-                 alignment: Alignment.centerLeft,
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8.0),
+                    // Subtle border if something is selected for editing
+                    border: _selectedEntityType != EntityType.none
+                        ? Border.all(color: Colors.blue.shade300, width: 1.5)
+                        : null,
+                  ),
+                  constraints: const BoxConstraints(minHeight: 100.0),
+                  alignment: Alignment.centerLeft,
                   child: Builder(builder: (context) {
-                     final effectiveSpan = (textSpanToShow.toPlainText().isNotEmpty || speechService.isListening)
-                                           ? textSpanToShow
-                                           : const TextSpan(text: ' ', style: TextStyle(fontSize: 18.0));
-                     return RichText(
-                        textAlign: TextAlign.left,
-                        text: effectiveSpan,
-                     );
+                     // Ensure effectiveSpan handles the initialized empty TextSpan correctly
+                     final effectiveSpan = (textSpanToShow.toPlainText().isNotEmpty || speechService.isListening || statusText.isNotEmpty) // Check statusText too
+                                         ? textSpanToShow
+                                         : const TextSpan(text: ' ', style: TextStyle(fontSize: 18.0)); // Placeholder if empty
+                     return RichText(textAlign: TextAlign.left, text: effectiveSpan);
                   }),
-              ),
-              const SizedBox(height: 10),
-
-              // Edit Buttons Area (No change)
-              AnimatedSize(
-                 duration: const Duration(milliseconds: 200),
-                 child: editActions ?? const SizedBox.shrink(),
-              ),
-              // Add spacing below edit buttons or display area
-              const SizedBox(height: 20),
-
-              // ** Test Phrase Dropdown **
-              DropdownButtonFormField<String>(
-                value: _selectedTestPhrase,
-                hint: const Text('Select a test phrase...'),
-                isExpanded: true, // Allow dropdown to expand
-                decoration: const InputDecoration(
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  border: OutlineInputBorder(),
                 ),
-                items: testCommandPhrases.map((String phrase) {
-                  return DropdownMenuItem<String>(
-                    value: phrase,
-                    child: Text(
-                      phrase,
-                      overflow: TextOverflow.ellipsis, // Prevent long text overflow
-                    ),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedTestPhrase = newValue;
-                    // Update the text field when a phrase is selected
-                    _textCommandController.text = newValue ?? '';
-                    _selectedEntityType = EntityType.none; // Reset entity selection
-                  });
-                },
-              ),
-              const SizedBox(height: 15), // Spacing after dropdown
-
-              // ** NEW: Text Input Row **
+              const SizedBox(height: 10),
+              // Edit Buttons Area
+              AnimatedSize(duration: const Duration(milliseconds: 200), child: editActions ?? const SizedBox.shrink()),
+              const SizedBox(height: 20),
+              // Test Phrase Dropdown
+              DropdownButtonFormField<String>(
+                  value: _selectedTestPhrase,
+                  hint: const Text('Select a test phrase...'),
+                  isExpanded: true, // Allow dropdown to expand
+                  decoration: const InputDecoration(
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: testCommandPhrases.map((String phrase) {
+                    return DropdownMenuItem<String>(
+                      value: phrase,
+                      child: Text( phrase, overflow: TextOverflow.ellipsis,),);
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _selectedTestPhrase = newValue;
+                      _textCommandController.text = newValue ?? '';
+                       _selectedEntityType = EntityType.none;
+                    });
+                  },
+               ),
+              const SizedBox(height: 15),
+              // Text Input Row
               Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _textCommandController,
-                      decoration: const InputDecoration(
-                        hintText: 'Or type command here...',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _textCommandController,
+                        decoration: const InputDecoration(
+                          hintText: 'Or type command here...',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        onSubmitted: (_) => _sendTextCommand(), // Allow sending via keyboard action
                       ),
-                      onSubmitted: (_) => _sendTextCommand(), // Allow sending via keyboard action
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: _sendTextCommand,
-                    tooltip: 'Send Text Command',
-                  ),
-                ],
-              ),
-              // ** End NEW Text Input Row **
-
-              const SizedBox(height: 20), // Spacing before Mic button
-
-              // Microphone Button Area (No change in logic)
-              const Text(
-                'Tap the microphone and speak your command:',
-                style: TextStyle(fontSize: 16.0),
-                textAlign: TextAlign.center,
-              ),
-               const SizedBox(height: 10),
-               ElevatedButton.icon(
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      onPressed: _sendTextCommand,
+                      tooltip: 'Send Text Command',
+                    ),
+                  ],
+               ),
+              const SizedBox(height: 20),
+              // Microphone Button Area
+              const Text('Tap the microphone and speak your command:', style: TextStyle(fontSize: 16.0), textAlign: TextAlign.center,),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
                     icon: Icon(speechService.isListening ? Icons.stop : Icons.mic, size: 30),
                     label: Text(speechService.isListening ? "I'm Done" : 'Listen'),
                     style: ElevatedButton.styleFrom(
@@ -489,29 +485,25 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? speechService.stopListening
                             : () {
                                 setState(() { _selectedEntityType = EntityType.none; });
-                                // Clear text field when starting voice
-                                _textCommandController.clear();
+                                _textCommandController.clear(); // Clear text field
+                                _selectedTestPhrase = null; // Clear dropdown
                                 speechService.startListening();
                               },
                   ),
-
-                 // Initialization Status Error (keep existing logic)
-                 if (!speechService.isSpeechEnabled &&
-                     speechService.lastError.isNotEmpty &&
-                     !speechService.isListening)
-                   Padding(
-                     padding: const EdgeInsets.only(top: 15.0, bottom: 10.0),
-                     child: Text(
-                       'Initialization Failed: ${speechService.lastError}',
-                       style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                       textAlign: TextAlign.center,
-                     ),
-                   ),
-
+              // Initialization Status Error
+              if (!speechService.isSpeechEnabled && speechService.lastError.isNotEmpty && !speechService.isListening)
+                Padding(
+                    padding: const EdgeInsets.only(top: 15.0, bottom: 10.0),
+                    child: Text(
+                      'Initialization Failed: ${speechService.lastError}',
+                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
             ],
           ),
         ),
       ),
     );
-  }
+  } // End build method
 }
