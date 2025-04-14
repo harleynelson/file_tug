@@ -19,6 +19,7 @@ dependencies:
   flutter_contacts: ^1.1.9+2
   dialog_flowtter: ^0.3.3  
   flutter_dotenv: ^5.2.1
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

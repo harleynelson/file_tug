@@ -1,0 +1,146 @@
+[
+    {
+      "id": "uuid-1",
+      "category": "Buying - Initial Contact & Showing",
+      "title": "Showing Confirmation",
+      "text": "Just confirming our showing appointment for [Property Address] on [Date] at [Time]. Looking forward to seeing you there! Let me know if anything changes on your end."
+    },
+    {
+      "id": "uuid-2",
+      "category": "Buying - Initial Contact & Showing",
+      "title": "Post-Showing Follow-up",
+      "text": "Thanks for viewing [Property Address] with me today! What were your initial thoughts? Happy to discuss further or schedule a second look if you're interested."
+    },
+    {
+      "id": "uuid-3",
+      "category": "Buying - Initial Contact & Showing",
+      "title": "New Listing Alert Match",
+      "text": "Hi [Client Name], a new property just hit the market that seems like a great match for what you're looking for: [Property Address]. Would you be interested in taking a look this week? Here's the link: [Link - Optional]"
+    },
+    {
+      "id": "uuid-4",
+      "category": "Buying - Initial Contact & Showing",
+      "title": "Open House Reminder",
+      "text": "Quick reminder about the open house at [Property Address] this [Day], [Date] from [Start Time] to [End Time]. Hope you can make it!"
+    },
+    {
+      "id": "uuid-5",
+      "category": "Buying - Offer & Negotiation",
+      "title": "Offer Submitted Notification",
+      "text": "Good news! We've officially submitted your offer for [Property Address]. I'll keep you updated as soon as I hear back from the listing agent."
+    },
+    {
+      "id": "uuid-6",
+      "category": "Buying - Offer & Negotiation",
+      "title": "Counter-Offer Received",
+      "text": "We've received a counter-offer on [Property Address]. I've attached the details for your review. Let's connect soon to discuss our next steps."
+    },
+    {
+      "id": "uuid-7",
+      "category": "Buying - Offer & Negotiation",
+      "title": "Offer Accepted!",
+      "text": "Fantastic news! Your offer for [Property Address] has been accepted! Congratulations! I'll be in touch shortly with the next steps regarding inspection and closing."
+    },
+    {
+      "id": "uuid-8",
+      "category": "Buying - Offer & Negotiation",
+      "title": "Offer Not Accepted",
+      "text": "Unfortunately, the seller decided to go with another offer for [Property Address]. While disappointing, we'll keep searching and find the right one for you. Let's discuss strategy moving forward."
+    },
+    {
+      "id": "uuid-9",
+      "category": "Selling - Listing & Marketing",
+      "title": "Listing Agreement Follow-up",
+      "text": "Thanks for meeting with me today! Please review the listing agreement we discussed for [Property Address]. Let me know if you have any questions before signing."
+    },
+    {
+      "id": "uuid-10",
+      "category": "Selling - Listing & Marketing",
+      "title": "Photo/Staging Prep Reminder",
+      "text": "Just a reminder that the photographer is scheduled for [Date] at [Time]. Please ensure the house is photo-ready as per the staging checklist we discussed. Let me know if you need anything!"
+    },
+    {
+      "id": "uuid-11",
+      "category": "Selling - Listing & Marketing",
+      "title": "Listing is Live!",
+      "text": "Exciting news! Your listing for [Property Address] is now live on the MLS and major real estate websites! You can view it here: [Link - Optional]. I'll keep you posted on showing activity."
+    },
+    {
+      "id": "uuid-12",
+      "category": "Selling - Listing & Marketing",
+      "title": "Showing Feedback Request (Agent)",
+      "text": "Hi [Agent Name], thanks for showing [Property Address] today. Would you mind sharing any feedback your clients had? Appreciate your time!"
+    },
+    {
+      "id": "uuid-13",
+      "category": "Selling - Offers & Closing",
+      "title": "Offer Received Notification",
+      "text": "We've received an offer on [Property Address]! I've attached the details for your review. Let's schedule a time to discuss it soon."
+    },
+    {
+      "id": "uuid-14",
+      "category": "Selling - Offers & Closing",
+      "title": "Multiple Offers Received",
+      "text": "We're in a great position! We've received multiple offers on [Property Address]. I'm preparing a summary for you, and we should connect soon to review them all."
+    },
+    {
+      "id": "uuid-15",
+      "category": "Selling - Offers & Closing",
+      "title": "Accepted Offer - Next Steps",
+      "text": "Congratulations! We have an accepted offer on [Property Address]. The next steps involve the buyer's inspection and appraisal. I'll coordinate the details and keep you informed."
+    },
+    {
+      "id": "uuid-16",
+      "category": "Selling - Offers & Closing",
+      "title": "Closing Day Reminder",
+      "text": "Just a reminder that your closing for [Property Address] is scheduled for [Date] at [Time] at [Location]. Please remember to bring your photo ID. Almost there!"
+    },
+    {
+      "id": "uuid-17",
+      "category": "General Client Communication",
+      "title": "Check-in / Market Update",
+      "text": "Hi [Client Name], just checking in! Hope you're doing well. The market is [brief market condition - e.g., still moving quickly/seeing some shifts]. Let me know if you have any questions or if your search/selling criteria have changed."
+    },
+    {
+      "id": "uuid-18",
+      "category": "General Client Communication",
+      "title": "Document Request",
+      "text": "Could you please send over the [Document Name] needed for the [Property Address] transaction when you have a moment? Let me know if you have any trouble finding it. Thanks!"
+    },
+    {
+      "id": "uuid-19",
+      "category": "General Client Communication",
+      "title": "Meeting Confirmation",
+      "text": "Confirming our meeting on [Date] at [Time] at [Location/Platform]. Looking forward to connecting!"
+    },
+    {
+      "id": "uuid-20",
+      "category": "General Client Communication",
+      "title": "Thank You / Post-Closing",
+      "text": "It was such a pleasure helping you [buy/sell] [Property Address]! Congratulations again. Please don't hesitate to reach out if you need anything in the future, or if you know anyone looking for real estate assistance!"
+    },
+    {
+      "id": "uuid-21",
+      "category": "Agent-to-Agent Communication",
+      "title": "Showing Request",
+      "text": "Hi [Agent Name], I'd like to request a showing for your listing at [Property Address] for my clients on [Date] around [Time]. Please let me know if that works. Thanks!"
+    },
+    {
+      "id": "uuid-22",
+      "category": "Agent-to-Agent Communication",
+      "title": "Offer Question",
+      "text": "Regarding the offer submitted for [Property Address], could you clarify [Specific Question]? Thanks!"
+    },
+    {
+      "id": "uuid-23",
+      "category": "Agent-to-Agent Communication",
+      "title": "Offer Presentation Info",
+      "text": "Following up on the offer for [Property Address]. Do you know when the seller(s) plan to review offers?"
+    },
+    {
+      "id": "uuid-24",
+      "category": "Agent-to-Agent Communication",
+      "title": "Listing Question",
+      "text": "Quick question about your listing at [Property Address]: [Specific Question about listing details]? Appreciate the info!"
+    }
+  ]

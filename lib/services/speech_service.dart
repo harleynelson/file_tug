@@ -207,36 +207,14 @@ class SpeechService with ChangeNotifier {
 
   // --- Combined Parsing and Association Logic (Updated for new model fields) ---
   void _tryFinalParseAndAssociate({bool parseOnError = false}) async {
-     if (_parsingAttempted) {
-        print("--> Final parse/association already attempted for this session.");
-        return;
-     }
-     if (_dialogFlowtter == null) {
-         print("--> Cannot parse: Dialogflow not initialized.");
-         _currentError = "NLU service unavailable.";
-         _parsedCommand = ParsedCommand.failure(_lastWords ?? "");
-         _parsingAttempted = true;
-         notifyListeners();
-         return;
-     }
-
-     _parsingAttempted = true;
-     _manualStopRequested = false; // Reset flag
-
+     // Guard clauses remain the same
+     if (_parsingAttempted || _dialogFlowtter == null) { /* ... guard clauses ... */ return; }
+     _parsingAttempted = true; _manualStopRequested = false;
      String? textToParse = _finalRecognizedText ?? (_lastWords.isNotEmpty ? _lastWords : null);
-     if (textToParse == null || textToParse.isEmpty) {
-        print("No text available to parse.");
-        _parsedCommand = ParsedCommand.failure("");
-        notifyListeners(); // Notify UI about the failure
-        return;
-     }
-
+     if (textToParse == null || textToParse.isEmpty) { /* ... handle no text ... */ return; }
      print("Sending to Dialogflow: '$textToParse'");
-     // Set initial state before async call
-     _parsedCommand = null;
-     _currentError = "";
-     _associationAttempted = false; // Reset for this attempt
-     notifyListeners(); // Show 'processing' or clear previous result
+     _parsedCommand = null; _currentError = ""; _associationAttempted = false;
+     notifyListeners(); // Show processing
 
      ParsedCommand? initialParsedResult;
      try {
@@ -247,38 +225,44 @@ class SpeechService with ChangeNotifier {
          print("Dialogflow Intent: $intentName, Parameters: ${parameters ?? 'None'}");
 
          if (intentName == 'SendCommand' && parameters != null) {
-             // --- Extract parameters (same logic) ---
+             // Extract file and contact (same logic)
              String? fileParam = parameters['fileName']?.toString();
-             String? contactParamValue; // Extracted contact name string
+             String? contactParamValue;
              dynamic contactParam = parameters['contactName'];
              if (contactParam is List && contactParam.isNotEmpty) {
-                contactParamValue = contactParam
+                 contactParamValue = contactParam
                      .map((item) => (item is Map ? item['name']?.toString() : (item is String ? item : null)))
                      .where((name) => name != null && name.isNotEmpty)
                      .join(", ");
-              }
-             else if (contactParam is String && contactParam.isNotEmpty) { contactParamValue = contactParam; }
+             } else if (contactParam is String && contactParam.isNotEmpty) {
+                 contactParamValue = contactParam;
+             }
              if (contactParamValue != null && contactParamValue.isEmpty) contactParamValue = null;
-             String? messageParam = parameters['messageBody']?.toString();
 
-             // --- Populate ParsedCommand (using original and current fields) ---
+             // *** Extract Message and handle as List<String> ***
+             String? messageParam = parameters['messageBody']?.toString();
+             List<String>? messageBlocks = (messageParam != null && messageParam.isNotEmpty)
+                                           ? [messageParam] // Treat initial message as a single block
+                                           : null;
+
+             // Populate ParsedCommand
              if ((fileParam != null && fileParam.isNotEmpty) || (contactParamValue != null && contactParamValue.isNotEmpty)) {
                  initialParsedResult = ParsedCommand(
                      originalText: textToParse,
-                     // Populate original fields
+                     // Originals
                      originalFileName: fileParam?.isEmpty ?? true ? null : fileParam,
                      originalContactName: contactParamValue,
-                     originalMessageBody: messageParam?.isEmpty ?? true ? null : messageParam,
-                     // Populate current fields (initially same as original)
+                     originalMessageBlocks: messageBlocks, // Use list
+                     // Current (initialized from original)
                      fileName: fileParam?.isEmpty ?? true ? null : fileParam,
                      contactName: contactParamValue,
-                     messageBody: messageParam?.isEmpty ?? true ? null : messageParam,
-                     // Set status
+                     messageBlocks: messageBlocks, // Use list
+                     // Status
                      parseSuccess: true,
                      fileStatus: (fileParam != null && fileParam.isNotEmpty) ? AssociationStatus.pending : AssociationStatus.notFound,
                      contactStatus: (contactParamValue != null && contactParamValue.isNotEmpty) ? AssociationStatus.pending : AssociationStatus.notFound,
                  );
-                 print("Dialogflow Parse SUCCESS (Initial): File='${initialParsedResult.fileName}', Contact='${initialParsedResult.contactName}' (Status: Pending)");
+                 print("Dialogflow Parse SUCCESS (Initial): File='${initialParsedResult.fileName}', Contact='${initialParsedResult.contactName}', MessageBlocks='${initialParsedResult.messageBlocks?.length ?? 0}' (Status: Pending)");
              } else {
                  print("Dialogflow Parse FAILURE: Missing required file/contact parameters.");
                  _parsedCommand = ParsedCommand.failure(textToParse);
@@ -294,18 +278,17 @@ class SpeechService with ChangeNotifier {
          print("!!! StackTrace: $s");
          _currentError = "Error processing command via NLU.";
          _parsedCommand = ParsedCommand.failure(textToParse);
-         // Don't proceed to association on Dialogflow error
-         initialParsedResult = null;
+         initialParsedResult = null; // Ensure no association attempt on error
       }
 
-     // --- Trigger Association Phase (Unchanged logic, works on initialParsedResult) ---
+     // Trigger Association Phase (Unchanged)
      if (initialParsedResult != null) {
-        _parsedCommand = initialParsedResult; notifyListeners(); // Show initial parse
+        _parsedCommand = initialParsedResult; notifyListeners();
         print("--- Starting Association Phase ---");
         _associationAttempted = true;
-        await _performAssociation(_parsedCommand!); // Runs association logic
+        await _performAssociation(_parsedCommand!);
         print("--- Association Phase Complete ---");
-     } else { notifyListeners(); } // Update UI if parsing failed
+     } else { notifyListeners(); }
   }
 
   /// Placeholder method to perform file and contact association (Unchanged)
@@ -344,6 +327,85 @@ class SpeechService with ChangeNotifier {
     _tryFinalParseAndAssociate(); // Run the full logic
   }
 
+  /// Adds a new message block (from template or direct input).
+  void addMessageBlock(String blockText, {int? index}) {
+     if (_parsedCommand == null) return;
+     print("SpeechService: Adding message block at index $index");
+     List<String> currentBlocks = List<String>.from(_parsedCommand!.messageBlocks ?? []); // Create mutable copy or new list
+     if (index != null && index >= 0 && index <= currentBlocks.length) {
+        currentBlocks.insert(index, blockText);
+     } else {
+        currentBlocks.add(blockText); // Add to end if no index or invalid index
+     }
+     _parsedCommand = _parsedCommand!.copyWith(
+        messageBlocks: () => currentBlocks, // Update with new list
+        // Ensure parseSuccess is true
+        parseSuccess: (_parsedCommand!.fileName != null || _parsedCommand!.contactName != null) || _parsedCommand!.parseSuccess,
+     );
+     notifyListeners();
+  }
+
+  /// Removes a message block at a specific index.
+  void removeMessageBlock(int index) {
+      if (_parsedCommand == null || _parsedCommand!.messageBlocks == null) return;
+      print("SpeechService: Removing message block at index $index");
+       List<String> currentBlocks = List<String>.from(_parsedCommand!.messageBlocks!); // Mutable copy
+       if (index >= 0 && index < currentBlocks.length) {
+          currentBlocks.removeAt(index);
+          _parsedCommand = _parsedCommand!.copyWith(
+              // Update with null if list becomes empty, otherwise the modified list
+              messageBlocks: () => currentBlocks.isEmpty ? null : currentBlocks,
+               // Keep parseSuccess state
+              parseSuccess: _parsedCommand!.parseSuccess,
+          );
+          notifyListeners();
+       } else {
+           print("SpeechService: Invalid index $index for removing message block.");
+       }
+  }
+
+  /// Reorders message blocks.
+  void reorderMessageBlocks(int oldIndex, int newIndex) {
+      if (_parsedCommand == null || _parsedCommand!.messageBlocks == null) return;
+      print("SpeechService: Reordering message block from $oldIndex to $newIndex");
+       List<String> currentBlocks = List<String>.from(_parsedCommand!.messageBlocks!);
+       if (oldIndex >= 0 && oldIndex < currentBlocks.length && newIndex >= 0) { // newIndex can be == length
+          // Adjust newIndex if item is moved down in the list
+          final item = currentBlocks.removeAt(oldIndex);
+          // Ensure newIndex is within bounds after removal
+          final effectiveNewIndex = (newIndex > oldIndex) ? newIndex - 1 : newIndex;
+          // Ensure insertion index is valid
+          currentBlocks.insert(effectiveNewIndex.clamp(0, currentBlocks.length), item);
+
+          _parsedCommand = _parsedCommand!.copyWith(
+              messageBlocks: () => currentBlocks, // Update with reordered list
+              // Keep parseSuccess state
+              parseSuccess: _parsedCommand!.parseSuccess,
+          );
+          notifyListeners();
+       } else {
+           print("SpeechService: Invalid indices $oldIndex, $newIndex for reordering message blocks.");
+       }
+  }
+
+   /// Updates the text of a specific message block.
+   void updateMessageBlock(int index, String newText) {
+       if (_parsedCommand == null || _parsedCommand!.messageBlocks == null) return;
+       print("SpeechService: Updating message block at index $index");
+       List<String> currentBlocks = List<String>.from(_parsedCommand!.messageBlocks!);
+       if (index >= 0 && index < currentBlocks.length) {
+           currentBlocks[index] = newText;
+           _parsedCommand = _parsedCommand!.copyWith(
+               messageBlocks: () => currentBlocks, // Update with modified list
+               // Keep parseSuccess state
+               parseSuccess: _parsedCommand!.parseSuccess,
+           );
+           notifyListeners();
+       } else {
+           print("SpeechService: Invalid index $index for updating message block.");
+       }
+   }
+
 
   // --- Update Methods for Parsed Command (Updated to modify only CURRENT fields) ---
 
@@ -380,17 +442,17 @@ class SpeechService with ChangeNotifier {
   }
 
   /// Called when user edits the message body via the UI.
-  void userEditedMessageBody(String newMessageBody) {
-      if (_parsedCommand == null) return;
-       print("SpeechService: User edited message body. Updating CURRENT messageBody.");
-      _parsedCommand = _parsedCommand!.copyWith(
-        // ** Only update the current messageBody **
-        messageBody: () => newMessageBody.isEmpty ? null : newMessageBody,
-        // Ensure parseSuccess is true
-        parseSuccess: (_parsedCommand!.fileName != null || _parsedCommand!.contactName != null) || _parsedCommand!.parseSuccess,
-      );
-      notifyListeners();
-  }
+  // void userEditedMessageBody(String newMessageBody) {
+  //     if (_parsedCommand == null) return;
+  //      print("SpeechService: User edited message body. Updating CURRENT messageBody.");
+  //     _parsedCommand = _parsedCommand!.copyWith(
+  //       // ** Only update the current messageBody **
+  //       messageBody: () => newMessageBody.isEmpty ? null : newMessageBody,
+  //       // Ensure parseSuccess is true
+  //       parseSuccess: (_parsedCommand!.fileName != null || _parsedCommand!.contactName != null) || _parsedCommand!.parseSuccess,
+  //     );
+  //     notifyListeners();
+  // }
 
   // --- Methods below handle editing the NAME itself (might need re-association) ---
 

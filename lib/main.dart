@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'services/speech_service.dart';    // Adjust path if needed
 import 'services/connection_service.dart'; // Adjust path if needed
 import 'screens/home_screen.dart';      // Adjust path if needed
+import 'services/template_service.dart';
 
 void main() {
   // Ensure Flutter bindings are initialized for async operations in main if needed
@@ -20,7 +21,8 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => SpeechService()),
-        ChangeNotifierProvider(create: (_) => ConnectionService()), // Add ConnectionService
+        ChangeNotifierProvider(create: (_) => ConnectionService()),
+        Provider(create: (_) => TemplateService()),
       ],
       child: MaterialApp(
         title: 'Realtor Assistant',
