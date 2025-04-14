@@ -1,60 +1,87 @@
-// ./lib/services/speech_service.dart (Entire File - Revised Logic)
+// ./lib/services/speech_service.dart (Entire File - Dialogflow Integration)
 
-import 'dart:async'; // Required for Timer if needed later, but not now
-import 'dart:io';
+import 'dart:async';
+// import 'dart:io'; // No longer needed directly here
+import 'dart:convert'; // Needed for Dialogflow response handling
 
 import 'package:flutter/foundation.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:googleapis/drive/v3.dart' as drive;
-import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'package:flutter/services.dart' show rootBundle; // Needed to load asset
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
-import 'command_parser_service.dart';
+import 'package:dialog_flowtter/dialog_flowtter.dart';
+// command_parser_service.dart is removed
 import '../models/parsed_command.dart';
 
 class SpeechService with ChangeNotifier {
   final SpeechToText _speechToText = SpeechToText();
-  final CommandParserService _parserService = CommandParserService();
+  DialogFlowtter? _dialogFlowtter; // Dialogflow client instance
 
+  // State Variables
   bool _isSpeechEnabled = false;
   bool _isListening = false;
   String _lastWords = "";
   String _currentError = "";
   ParsedCommand? _parsedCommand;
 
-  // --- New state variables for final result handling ---
-  String? _finalRecognizedText; // Stores text specifically marked as final=true
-  bool _finalResultReceived = false; // Flag if we received final=true
-  bool _parsingAttempted = false; // Ensure parsing happens only once per session
+  // State variables for final result handling from speech_to_text
+  String? _finalRecognizedText;
+  bool _finalResultReceived = false;
+  bool _parsingAttempted = false;
+
+  // Timer and Manual Stop Control (Keep if desired)
+  Timer? _listenTimer;
+  bool _manualStopRequested = false;
+  final Duration _maxListenDuration = const Duration(seconds: 30);
 
   // --- Getters ---
   bool get isListening => _isListening;
   bool get isSpeechEnabled => _isSpeechEnabled;
-  String get recognizedWords => _lastWords; // Keep showing live words
+  String get recognizedWords => _lastWords;
   String get lastError => _currentError;
   ParsedCommand? get parsedCommand => _parsedCommand;
 
+  // --- Initialization ---
   Future<void> initialize() async {
-    // Clear state just in case
     _resetState();
     try {
+      // Initialize Dialogflow first
+      await _initializeDialogflow();
+
+      // Initialize SpeechToText
       _isSpeechEnabled = await _speechToText.initialize(
         onError: _statusErrorListener,
         onStatus: _statusListener,
       );
+
+      // Check if both services initialized correctly
       if (!_isSpeechEnabled) {
         _currentError = "Speech recognition not available.";
+      } else if (_dialogFlowtter == null) {
+        _currentError = "Dialogflow NLU service could not be initialized.";
+        _isSpeechEnabled = false; // Can't process commands without NLU
       } else {
-        _currentError = "";
+        _currentError = ""; // Both initialized successfully
       }
     } catch (e) {
       _isSpeechEnabled = false;
-      _currentError = "Error initializing speech: ${e.toString()}";
-      print("Error initializing speech: $e");
+      _currentError = "Error initializing services: ${e.toString()}";
+      print("Error initializing services: $e");
     }
     notifyListeners();
+  }
+
+  // Helper to initialize Dialogflow
+  Future<void> _initializeDialogflow() async {
+    try {
+      // Ensure path matches where you placed the JSON key in assets
+      final String credentialsJson = await rootBundle.loadString('assets/dialogflow_credentials.json');
+      final credentials = DialogAuthCredentials.fromJson(jsonDecode(credentialsJson));
+      _dialogFlowtter = DialogFlowtter(credentials: credentials);
+      print("Dialogflow initialized successfully.");
+    } catch (e) {
+      print("!!! Error initializing Dialogflow: $e");
+      _dialogFlowtter = null;
+    }
   }
 
   // Helper to reset session state
@@ -65,24 +92,52 @@ class SpeechService with ChangeNotifier {
      _finalRecognizedText = null;
      _finalResultReceived = false;
      _parsingAttempted = false;
+     _manualStopRequested = false;
+     _cancelTimer();
      // _isListening state managed by listeners/controls
   }
 
+  // Helper to cancel the timer
+  void _cancelTimer() {
+    _listenTimer?.cancel();
+    _listenTimer = null;
+  }
+
+  // --- Listening Control ---
   void startListening() {
     if (!_isSpeechEnabled || _isListening) return;
 
-    _resetState(); // Reset all state for new session
-    notifyListeners(); // Update UI immediately (e.g., clear old text)
+    _resetState();
+    _isListening = true; // Assume listening starts immediately for UI feedback
+    _manualStopRequested = false;
+    notifyListeners(); // Update UI immediately
 
-    print("Starting speech listening (max 30 seconds or manual stop)...");
+    print("Starting speech listening (max ${_maxListenDuration.inSeconds} seconds or manual stop)...");
+
+    // Start app-level timer (optional, provides backup timeout)
+    _cancelTimer();
+    _listenTimer = Timer(_maxListenDuration, _onTimerExpired);
 
     _speechToText.listen(
       onResult: _onSpeechResult,
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 30),
+      listenFor: _maxListenDuration,
+      pauseFor: const Duration(seconds: 10), // Use a reasonable pause duration
       localeId: "en_US",
+      listenMode: ListenMode.dictation, // Use dictation mode
+      partialResults: true,
+      cancelOnError: false, // Handle errors via listener
     );
-    // Let statusListener set _isListening = true
+  }
+
+  // Called when our manual 30-second timer expires
+  void _onTimerExpired() {
+    print("Listen timer expired after ${_maxListenDuration.inSeconds} seconds.");
+    if (_isListening) {
+        print("Timer causing stop. Stopping listening.");
+        _speechToText.stop(); // Ask plugin to stop
+        // Let status listener handle state change
+    }
+     _listenTimer = null;
   }
 
   void stopListening() {
@@ -91,141 +146,255 @@ class SpeechService with ChangeNotifier {
       return;
     }
     print("StopListening called manually.");
-    _speechToText.stop(); // Request stop
+    _manualStopRequested = true; // Set flag
+    _cancelTimer(); // Cancel the timer
 
-    // Assume stopped locally for UI responsiveness
+    _speechToText.stop(); // Ask plugin to stop
+
+    // --- Directly handle state change and parsing on manual stop ---
+    bool wasListening = _isListening;
     _isListening = false;
-    print("--> State updated: No Longer Listening (manual stop)");
+    print("--> State updated: No Longer Listening (Manual stop)");
 
-    // Attempt final parse if not already done
-    _tryFinalParse();
-
-    // Notify UI about listening state change and potentially parsed command
-    notifyListeners();
+    if (wasListening) {
+        _tryFinalParse(); // Trigger parse immediately
+        // No need to notify here, _tryFinalParse will notify at the end
+    }
+    // --------------------------------------------------------------
   }
 
-  /// Called when the speech recognition result is available
-  void _onSpeechResult(SpeechRecognitionResult result) {
-    // Always update the live words
-    _lastWords = result.recognizedWords;
-    print("Speech Result: '$_lastWords' (Final: ${result.finalResult})");
+  // --- SpeechToText Callbacks ---
 
-    // If this result is marked as final, store it and set the flag
+  /// Called when speech recognition result is available
+  void _onSpeechResult(SpeechRecognitionResult result) {
+    _lastWords = result.recognizedWords;
+    // Minimal logging here to avoid spamming console during active speech
+    // print("Speech Result: '$_lastWords' (Final: ${result.finalResult})");
+
     if (result.finalResult) {
-      print("--> FinalResult flag received. Storing final text.");
+      print("--> FinalResult flag received from STT. Storing final text: '$_lastWords'");
       _finalRecognizedText = result.recognizedWords;
       _finalResultReceived = true;
-      // Do NOT parse here, wait for session end signals
     }
 
-    // Notify UI to update with the latest live words
-    notifyListeners();
+    // Only notify if still listening to update live words in UI
+    if(_isListening) {
+        notifyListeners();
+    }
   }
 
-  /// Called when the listening status changes
+  /// Called when the STT listening status changes
   void _statusListener(String status) {
-    print('Speech status changed: $status - Current _isListening state: $_isListening');
+    print('STT status changed: $status - Current _isListening state: $_isListening');
+    bool wasListening = _isListening;
 
     if (status == SpeechToText.listeningStatus) {
-      if (!_isListening) {
-         _isListening = true;
-         _currentError = ""; // Clear error on successful listen start
-         print("--> State updated: Now Listening");
-         notifyListeners();
-      }
-    } else { // Status implies not listening ('done', 'notListening', etc.)
-      if (_isListening) { // Only act if we thought we were listening
-         _isListening = false;
-         print("--> State updated: No Longer Listening (stopped by status change: $status)");
-
-         // Attempt final parse if not already done
-         _tryFinalParse();
-
-         notifyListeners(); // Notify UI about listening state change and potentially parsed command
-      } else {
-        print("--> Status indicates not listening ($status), state was already false.");
-        // It's possible a 'done' status comes slightly after 'notListening' was already processed
-        // or after stopListening was called manually. In this case, parsing should have already
-        // been attempted by the first event that set _isListening to false.
-      }
+        if (!wasListening) {
+           _isListening = true;
+           _currentError = "";
+           print("--> State confirmed: Now Listening");
+           notifyListeners();
+        } else {
+           print("--> State already listening, STT status confirms.");
+        }
+    } else if (status == SpeechToText.notListeningStatus || status == SpeechToText.doneStatus) {
+        if (wasListening) {
+            bool timerExpired = _listenTimer == null && !_manualStopRequested;
+            if (timerExpired) {
+                 _isListening = false;
+                 print("--> State updated: No Longer Listening (Reason: Timer) Status: $status");
+                 _tryFinalParse(); // Parse when timer expires
+                 // No need to notify here, _tryFinalParse will notify at the end
+            } else if (_manualStopRequested) {
+                 print("--> STT Status '$status' received after manual stop. State already updated.");
+                 // Ensure state is false if somehow missed in stopListening
+                 if (_isListening) {
+                    _isListening = false;
+                    notifyListeners(); // Notify just in case state wasn't updated
+                 }
+            } else {
+                print("--> Ignoring premature STT '$status' status change, waiting for manual stop or timer.");
+            }
+        } else {
+             print("--> STT Status '$status' received but state was already not listening.");
+        }
+    } else {
+        print("--> Unhandled STT status: $status");
     }
   }
 
-  /// Called on recognition errors
+  /// Called on STT recognition errors
   void _statusErrorListener(dynamic errorNotification) {
-      print('!!! Speech Error Received: $errorNotification - Listening state was: $_isListening');
-      _currentError = "Error: ${errorNotification.errorMsg} (${errorNotification.permanent ? 'Permanent' : 'Temporary'})";
-      if (_isListening) {
-          _isListening = false;
-          print("--> State updated: No Longer Listening due to error.");
+      print('!!! STT Error Received: ${errorNotification.errorMsg} - Listening state was: $_isListening');
+      _currentError = "STT Error: ${errorNotification.errorMsg}";
 
-          // Attempt final parse with potentially incomplete words on error? Or just show error?
-          // Let's prioritize showing the error. We could optionally try parsing _lastWords here.
-          _tryFinalParse(parseOnError: true); // Optionally parse on error
-
-          notifyListeners();
+      if (_isListening) { // Only act if we thought we were listening
+          _isListening = false; // Stop listening on error
+          _cancelTimer(); // Stop timer on error
+          print("--> State updated: No Longer Listening due to STT error.");
+          _tryFinalParse(parseOnError: true); // Attempt parse on error
+          // No need to notify here, _tryFinalParse will notify at the end
       } else {
-         print("--> Error received but state was already not listening.");
-         notifyListeners(); // Still notify to show the error message
+         print("--> STT Error received but state was already not listening.");
+         // Update UI to show the error even if not listening
+         notifyListeners();
       }
   }
 
-  // --- Centralized Parsing Logic ---
-  /// Attempts to parse the final text, ensuring it only happens once.
-  /// Prioritizes text marked with finalResult=true if available.
-  void _tryFinalParse({bool parseOnError = false}) {
+  // --- Dialogflow Parsing Logic ---
+  void _tryFinalParse({bool parseOnError = false}) async { // Make async
      if (_parsingAttempted) {
         print("--> Final parse already attempted for this session.");
-        return; // Only parse once
+        return;
      }
+     if (_dialogFlowtter == null) {
+         print("--> Cannot parse: Dialogflow not initialized.");
+         _currentError = "NLU service unavailable.";
+         _parsedCommand = ParsedCommand.failure(_lastWords ?? "");
+         _parsingAttempted = true;
+         notifyListeners();
+         return;
+     }
+
      _parsingAttempted = true;
+     _manualStopRequested = false;
 
      String? textToParse;
-
-     // Prioritize the text received with the finalResult flag
-     if (_finalResultReceived && _finalRecognizedText != null) {
+     if (_finalResultReceived && _finalRecognizedText != null && _finalRecognizedText!.isNotEmpty) {
         textToParse = _finalRecognizedText;
-        print("Parsing final text (from finalResult=true): '$textToParse'");
      } else if (_lastWords.isNotEmpty) {
-        // Fallback to the last known words if no finalResult flag was received
-        // (e.g., manual stop before final flag, maybe some errors)
         textToParse = _lastWords;
-         print("Parsing final text (fallback to last words): '$textToParse'");
-     } else {
-         print("No text available to parse.");
-         return; // Nothing to parse
      }
 
-     // Only proceed if we have text
-     if (textToParse != null && textToParse.isNotEmpty) {
-         _parsedCommand = _parserService.parseSendCommand(textToParse);
-         print("Parser result: Success=${_parsedCommand?.parseSuccess}, File='${_parsedCommand?.fileName}', Contact='${_parsedCommand?.contactName}', Message='${_parsedCommand?.messageBody}'");
-
-         // Optionally clear error if parsing succeeds after an error occurred?
-         // if (!parseOnError && _parsedCommand?.parseSuccess == true && _currentError.isNotEmpty) {
-         //    _currentError = "";
-         // }
-     } else {
-         print("Final text to parse was empty.");
+     if (textToParse == null || textToParse.isEmpty) {
+        print("No text available to parse.");
+        _parsedCommand = ParsedCommand.failure("");
+        return;
      }
-     // No need to notify here, the calling methods (stopListening, statusListener, errorListener) will notify.
+
+     print("Sending to Dialogflow: '$textToParse'");
+     _parsedCommand = null;
+     _currentError = "";
+     notifyListeners();
+
+     try {
+         DetectIntentResponse response = await _dialogFlowtter!.detectIntent(
+            queryInput: QueryInput(text: TextInput(text: textToParse)),
+         );
+
+         QueryResult? queryResult = response.queryResult;
+         String intentName = queryResult?.intent?.displayName ?? "unknown";
+         Map<String, dynamic>? parameters = queryResult?.parameters;
+
+         print("Dialogflow Intent: $intentName");
+         print("Dialogflow Parameters: ${parameters ?? 'None'}");
+
+         // !!! IMPORTANT: Ensure 'SendCommand' matches the Intent name in Dialogflow !!!
+         if (intentName == 'SendCommand' && parameters != null) {
+             // --- Parameter Extraction with Multi-Contact Handling ---
+             String? file = parameters['fileName']?.toString();
+
+             String? contact;
+             dynamic contactParam = parameters['contactName'];
+             if (contactParam is List && contactParam.isNotEmpty) {
+                 // Extract names from the list, filter nulls/empty, join with ", "
+                 contact = contactParam
+                     .map((item) {
+                         if (item is Map) {
+                             return item['name']?.toString(); // Extract name if it's a map
+                         } else if (item is String) {
+                             return item; // Handle if it's just a list of strings
+                         }
+                         return null; // Ignore other types
+                     })
+                     .where((name) => name != null && name.isNotEmpty) // Filter out nulls/empty
+                     .join(", "); // Join valid names
+             } else if (contactParam is String && contactParam.isNotEmpty) {
+                 // Handle case where it's just a single string
+                 contact = contactParam;
+             }
+             // If extraction resulted in an empty string, set contact to null
+             if (contact != null && contact.isEmpty) {
+                contact = null;
+             }
+
+             String? message = parameters['messageBody']?.toString();
+             // --- End Parameter Extraction ---
+
+             // Basic validation: require file OR contact for success
+             if ((file != null && file.isNotEmpty) || (contact != null && contact.isNotEmpty)) {
+                 _parsedCommand = ParsedCommand(
+                     originalText: textToParse,
+                     fileName: file?.isEmpty ?? true ? null : file,
+                     contactName: contact, // Use the potentially joined contact string
+                     messageBody: message?.isEmpty ?? true ? null : message,
+                     parseSuccess: true,
+                 );
+                  print("Parser result (from Dialogflow): Success=true, File='${_parsedCommand?.fileName}', Contact='${_parsedCommand?.contactName}', Message='${_parsedCommand?.messageBody}'");
+             } else {
+                 print("Dialogflow parsed 'SendCommand', but missing required file/contact parameters.");
+                 _parsedCommand = ParsedCommand.failure(textToParse);
+                 _currentError = "Missing file or contact name in command.";
+             }
+         }
+         // ... (rest of the error handling as before) ...
+         else if (queryResult != null) {
+              print("Dialogflow intent '$intentName' not recognized or parameters missing.");
+             _parsedCommand = ParsedCommand.failure(textToParse);
+             _currentError = "Command not recognized by NLU.";
+         }
+         else {
+              print("Dialogflow returned an unexpected or empty response.");
+              _parsedCommand = ParsedCommand.failure(textToParse);
+              _currentError = "NLU service returned empty response.";
+         }
+
+     } catch (e, s) {
+         print("!!! Error calling Dialogflow or processing response: $e");
+         print("!!! StackTrace: $s");
+         _currentError = "Error processing command via NLU.";
+         _parsedCommand = ParsedCommand.failure(textToParse);
+     } finally {
+         notifyListeners();
+     }
+  }
+
+  /// Processes text input directly using Dialogflow.
+  Future<void> processTextCommand(String textToParse) async { // Keep async if needed elsewhere, but await removed below
+    // Reset parsing state for this new command
+    _parsingAttempted = false;
+    _parsedCommand = null;
+    _currentError = "";
+    // Reset STT specific fields as well for consistency
+    _lastWords = textToParse; // Store the input text here
+    _finalRecognizedText = textToParse;
+    _finalResultReceived = true; // Treat text input as final
+
+    print("Processing text command: '$textToParse'");
+
+    // Call the existing parsing logic, but DON'T await it here.
+    // It will run asynchronously and notify listeners when done.
+    _tryFinalParse(); // REMOVED await
+
+    // No need to notify here, _tryFinalParse handles it.
   }
 
 
-  // --- Update Methods for Parsed Command (Keep Existing) ---
-  void updateParsedFileName(String newFileName) { /* ... no change ... */
+  // --- Update Methods for Parsed Command (No Change Needed) ---
+  // These allow the UI (HomeScreen) to update the parsed results if the user edits them.
+  void updateParsedFileName(String newFileName) {
       if (_parsedCommand == null) return;
     _parsedCommand = ParsedCommand(
       originalText: _parsedCommand!.originalText,
       fileName: newFileName,
       contactName: _parsedCommand!.contactName,
       messageBody: _parsedCommand!.messageBody,
-      parseSuccess: _parsedCommand!.parseSuccess,
+      parseSuccess: _parsedCommand!.parseSuccess, // Keep success status
     );
     print("SpeechService: Updated file name to '$newFileName'");
     notifyListeners();
    }
-  void updateParsedContactName(String newContactName) { /* ... no change ... */
+  void updateParsedContactName(String newContactName) {
       if (_parsedCommand == null) return;
     _parsedCommand = ParsedCommand(
       originalText: _parsedCommand!.originalText,
@@ -237,7 +406,7 @@ class SpeechService with ChangeNotifier {
      print("SpeechService: Updated contact name to '$newContactName'");
     notifyListeners();
   }
-  void updateParsedMessageBody(String newMessageBody) { /* ... no change ... */
+  void updateParsedMessageBody(String newMessageBody) {
       if (_parsedCommand == null) return;
     _parsedCommand = ParsedCommand(
       originalText: _parsedCommand!.originalText,
@@ -249,7 +418,7 @@ class SpeechService with ChangeNotifier {
      print("SpeechService: Updated message body to '$newMessageBody'");
     notifyListeners();
   }
-  void setParseSuccess(bool success) { /* ... no change ... */
+  void setParseSuccess(bool success) {
        if (_parsedCommand == null) return;
      _parsedCommand = ParsedCommand(
       originalText: _parsedCommand!.originalText,
@@ -262,99 +431,4 @@ class SpeechService with ChangeNotifier {
     notifyListeners();
    }
 
-  // --- Local Storage Methods etc (Keep Existing) ---
-  // ... (appDocumentsPath, listAppDirectoryFiles, pickLocalFiles, etc.) ...
-  String? _appDocumentsPath;
-  List<FileSystemEntity> _appDirectoryFiles = [];
-  bool _isLocalLoading = false;
-  String? _lastPickedFilePath;
-  String? get appDocumentsPath => _appDocumentsPath;
-  List<FileSystemEntity> get appDirectoryFiles => _appDirectoryFiles;
-  bool get isLocalLoading => _isLocalLoading;
-  String? get lastPickedFilePath => _lastPickedFilePath;
-  bool get isLocalStorageAvailable => _appDocumentsPath != null;
-
-    Future<void> _loadAppDirectoryPath() async {
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      _appDocumentsPath = directory.path;
-      print("App Documents Path: $_appDocumentsPath");
-    } catch (e) {
-      print("Error getting app documents directory: $e");
-      _appDocumentsPath = null; // Ensure it's null on error
-    }
-  }
-   Future<void> listAppDirectoryFiles() async {
-     if (_appDocumentsPath == null || _isLocalLoading) return;
-    _isLocalLoading = true;
-    _appDirectoryFiles = []; // Clear previous list
-    notifyListeners();
-    try {
-      final dir = Directory(_appDocumentsPath!);
-      final List<FileSystemEntity> entities = await dir.list().toList();
-      _appDirectoryFiles = entities;
-      print("Found ${_appDirectoryFiles.length} items in app directory.");
-    } catch (e) {
-      print("Error listing files in app directory: $e");
-      _appDirectoryFiles = []; // Clear list on error
-    } finally {
-      _isLocalLoading = false;
-      notifyListeners();
-    }
-  }
-   Future<void> pickLocalFiles({bool allowMultiple = false}) async {
-    if (_isLocalLoading) return;
-    _isLocalLoading = true;
-    _lastPickedFilePath = null; // Clear previous pick
-    notifyListeners();
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-        allowMultiple: allowMultiple,
-      );
-      if (result != null) {
-        if (allowMultiple) {
-          print("Picked ${result.files.length} files");
-          _lastPickedFilePath = result.files.first.path;
-        } else if (result.files.single.path != null) {
-           _lastPickedFilePath = result.files.single.path!;
-           print("Picked file: $_lastPickedFilePath");
-        } else {
-           print("Picked file has no path.");
-           _lastPickedFilePath = null;
-        }
-      } else {
-        print("User cancelled file picking.");
-        _lastPickedFilePath = null;
-      }
-    } catch (e) {
-      print("Error picking files: $e");
-       _lastPickedFilePath = null;
-    } finally {
-      _isLocalLoading = false;
-      notifyListeners();
-    }
-  }
-   Future<File?> saveFileToAppDirectory(PlatformFile fileToSave) async {
-     if (_appDocumentsPath == null) return null;
-     try {
-        final String destinationPath = p.join(_appDocumentsPath!, fileToSave.name);
-        final File destinationFile = File(destinationPath);
-        if (fileToSave.path != null) {
-           await File(fileToSave.path!).copy(destinationPath);
-           print("File saved to: $destinationPath");
-           await listAppDirectoryFiles(); // Refresh file list
-           return destinationFile;
-        }
-     } catch(e) {
-        print("Error saving file: $e");
-     }
-     return null;
-  }
-
-  // --- Other connection placeholders (Keep Existing) ---
-  bool get isDropboxConnected => false; // Placeholder
-  Future<void> connectDropbox() async { /* ... */ }
-  Future<void> disconnectDropbox() async { /* ... */ }
-
-} // End of SpeechService
+} // End of SpeechService class

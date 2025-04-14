@@ -1,0 +1,23 @@
+// List of test phrases for the command input field
+const List<String> testCommandPhrases = [
+  "Email the listing presentation to Karen with a message that says \"Let me know if Thursday still works for our meeting.\"",
+  "Send the buyer's guide to Thomas Moore.",
+  "Can you send the staging checklist to Alex?",
+  "Please email the open house flyer to Jennifer with a note that says \"Thanks again for the walkthrough yesterday!\"",
+  "Email the seller's packet to Brian with no message.",
+  "Can you please send the house plans to George?",
+  "Send the brochure to Olivia Taylor with a quick message: \"Take a look and let me know what stands out to you.\"",
+  "Email the inspection report to Chris with a note saying \"Just got this from the inspector. Let me know if you have any questions.\"",
+  "Send the listing presentation to Danielle.",
+  "Could you email the floor plan to Jessica with a note that says \"Here's what the architect sent over.\"",
+  "Email the seller checklist to Amanda Peterson.",
+  "Please send the final offer letter to Charles with a message: \"This is the updated version after our call.\"",
+  "Can you email the disclosures packet to Nathan?",
+  "Send the photography guidelines to Lily with a note saying \"Make sure to forward this to the photographer.\"",
+  "Email the walkthrough checklist to Derek Johnson.",
+  "Can you please send the buyer’s presentation to Rachel?",
+  "Email the pricing sheet to Sarah Nguyen.",
+  "Please send the comps document to Brian with the message \"Just pulled these this morning. Let me know if any stand out.\"",
+  "Send the house brochure to Maya.",
+  "Could you email the pre-approval checklist to Steven Patel?",
+];
